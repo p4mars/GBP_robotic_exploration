@@ -190,36 +190,157 @@ def write_ate_csv(result: Evaluation, path: str | Path) -> None:
 #############
 
 
-def plot_trajectories(result: Evaluation, path: str | Path) -> None:
-    """Top-down GT / odometry / optimized panels; grey lines mark inter-robot loop closures."""
+# Paul Tol's "muted" qualitative scheme: colour-blind safe, print friendly.
+ROVER_COLORS = ("#332288", "#88CCEE", "#44AA99", "#117733", "#999933", "#DDCC77", "#CC6677", "#882255", "#AA4499", "#DDDDDD")
+_STYLE = {
+    "gt": dict(ls=(0, (4.0, 1.6)), lw=0.9, alpha=1.0, label="Ground truth"),
+    "odometry": dict(ls=(0, (0.6, 1.4)), lw=1.3, alpha=1.0, label="Odometry (drifted, aligned per rover)", dash_capstyle="round"),
+    "optimized": dict(ls="-", lw=2.4, alpha=0.35, label="Swarm-SLAM optimized", solid_capstyle="round"),
+}
+_RC = {
+    "font.family": "serif",
+    "font.serif": ["STIXGeneral", "DejaVu Serif"],
+    "mathtext.fontset": "stix",
+    "font.size": 9,
+    "axes.linewidth": 0.6,
+    "axes.edgecolor": "0.25",
+    "axes.labelcolor": "0.15",
+    "xtick.color": "0.25",
+    "ytick.color": "0.25",
+    "xtick.direction": "in",
+    "ytick.direction": "in",
+    "xtick.major.width": 0.6,
+    "ytick.major.width": 0.6,
+    "legend.frameon": False,
+}
+
+
+def _setup_lines(result: Evaluation, scene: dict | None) -> list[tuple[str, str]]:
+    """``(key, value)`` rows describing the run; ``scene`` is the run's ``scene.yaml``."""
+    rows: list[tuple[str, str]] = []
+    if scene:
+        run, terrain, motion = scene.get("run", {}), scene.get("terrain", {}), scene.get("motion", {})
+        cams, layout = scene.get("cameras", {}), scene.get("layout", {})
+        types = sorted({r.get("type", "?") for r in scene.get("rovers", [])})
+        rows += [
+            ("Terrain", f"{terrain.get('kind', '?')}, {terrain.get('size_m', '?')} m"),
+            ("Rovers", f"{len(scene.get('rovers', []))} × {', '.join(types)}"),
+            ("Layout", f"{layout.get('kind', '?')}, {layout.get('spacing_m', '?')} m spacing"),
+            ("Motion", f"{motion.get('kind', '?')}, {motion.get('speed_mps', '?')} m/s"),
+        ]
+        if "steps_run" in run and "step_dt_s" in run:
+            rows.append(("Duration", f"{run['steps_run'] * run['step_dt_s']:.0f} s ({run.get('frames', '?')} frames)"))
+        if cams:
+            w, h = cams.get("resolution", ("?", "?"))
+            rows.append(("Camera", f"RGB-D {w}×{h}, {cams.get('hfov_deg', '?'):g}° HFOV"))
+    rows += [
+        ("Keyframes", f"{sum(len(t.keys) for t in result.tracks)}"),
+        ("Inter-robot LC", f"{len(result.loop_closures)}"),
+    ]
+    return rows
+
+
+def plot_trajectories(result: Evaluation, path: str | Path, scene: dict | None = None) -> None:
+    """GT, odometry and optimized trajectories in one top-down plot, with a side panel of legend and stats.
+
+    ``scene`` (the run's ``scene.yaml``) adds the setup to the stats panel.
+    Thin grey lines join the optimized keyframes of inter-robot loop closures.
+    """
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
 
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5.5), sharex=True, sharey=True)
-    panels = (("Ground truth", "gt"), ("Odometry (aligned per robot)", "odometry"), ("Swarm-SLAM optimized", "optimized"))
-    for ax, (title, attr) in zip(axes, panels):
-        positions = {}
+    with plt.rc_context(_RC):
+        fig = plt.figure(figsize=(10.5, 6.5))
+        gs = fig.add_gridspec(1, 2, width_ratios=(1.0, 0.42), wspace=0.04, left=0.07, right=0.985, top=0.95, bottom=0.09)
+        ax, side = fig.add_subplot(gs[0]), fig.add_subplot(gs[1])
+        side.axis("off")
+
+        positions: dict[int, np.ndarray] = {}
         for track in result.tracks:
-            xyz = getattr(track, attr)
-            ax.plot(xyz[:, 0], xyz[:, 1], "-", lw=1.5, label=f"r{track.robot_id} ({len(track.keys)} kf)")
-            ax.plot(xyz[:1, 0], xyz[:1, 1], "o", color=ax.lines[-1].get_color())
-            positions.update(zip(track.keys, xyz))
-        if attr != "odometry":  # odometry tracks live in unrelated frames
-            for a, b in result.loop_closures:
-                if a in positions and b in positions:
-                    ax.plot(*np.stack((positions[a], positions[b]))[:, :2].T, "-", color="0.6", lw=0.8, zorder=0)
-        ate = [getattr(t, f"ate_{attr}") for t in result.tracks] if attr != "gt" else []
-        ax.set_title(title + (f"\nmean ATE {np.nanmean(ate):.2f} m" if ate else f"\n{len(result.loop_closures)} inter-robot loop closures"))
-        ax.set_xlabel("x [m]")
-        ax.set_aspect("equal")
-        ax.grid(alpha=0.3)
-    axes[0].set_ylabel("y [m]")
-    axes[0].legend(loc="best", fontsize=8)
-    # fig.tight_layout()
-    fig.savefig(path, dpi=120)
-    plt.close(fig)
+            color = ROVER_COLORS[track.robot_id % len(ROVER_COLORS)]
+            for attr, style in _STYLE.items():
+                xy = getattr(track, attr)[:, :2]
+                if not len(xy):
+                    continue
+                kw = {k: v for k, v in style.items() if k != "label"}
+                ax.plot(xy[:, 0], xy[:, 1], color=color, zorder=2, **kw)
+                ax.plot(*xy[0], "o", ms=6.5, mfc="white", mec=color, mew=1.1, zorder=4)
+                ax.plot(*xy[-1], "o", ms=3.6, mfc=color, mec=color, mew=0, zorder=5)
+            positions.update(zip(track.keys, track.optimized))
+
+        n_lc = 0
+        for a, b in result.loop_closures:
+            if a in positions and b in positions:
+                ax.plot(*np.stack((positions[a], positions[b]))[:, :2].T, "-", color="0.55", lw=0.5, alpha=0.8, zorder=1)
+                n_lc += 1
+
+        ax.set_aspect("equal", adjustable="datalim")
+        ax.set_xlabel(r"$x$ [m]")
+        ax.set_ylabel(r"$y$ [m]")
+        ax.grid(color="0.88", lw=0.5, zorder=0)
+        ax.set_axisbelow(True)
+
+        # Side panel, laid out top-down in rows of fixed height.
+        bbox = side.get_position()
+        row = 13.0 / (bbox.height * fig.get_figheight() * 72.0)  # 13 pt per row, in axes fraction
+        x0, cols = 0.04, (0.04, 0.50, 0.76)
+        y = 1.0
+        txt = dict(fontsize=8.5, va="top", transform=side.transAxes)
+        rule = dict(color="0.6", lw=0.5, transform=side.transAxes, clip_on=False)
+
+        def heading(text: str) -> None:
+            nonlocal y
+            side.text(x0, y, text, fontsize=9.5, weight="bold", va="top", transform=side.transAxes)
+            y -= 1.4 * row
+
+        # Section 1: rover colours, with each rover's ATE.
+        heading("Rovers  ·  ATE RMSE [m]")
+        for x, head in zip(cols, ("Rover", "Odometry", "SLAM")):
+            side.text(x + (0.11 if x == x0 else 0.0), y, head, color="0.35", **txt)
+        y -= 1.1 * row
+        side.plot([x0, 0.98], [y, y], **rule)
+        y -= 0.3 * row
+        ate = [(t.robot_id, t.ate_odometry, t.ate_optimized) for t in result.tracks]
+        for rid, odo, opt in ate:
+            color = ROVER_COLORS[rid % len(ROVER_COLORS)]
+            side.plot([x0, x0 + 0.08], [y - 0.42 * row] * 2, color=color, lw=3.0, solid_capstyle="butt", transform=side.transAxes)
+            for x, val in zip(cols, (f"{rid}", f"{odo:.3f}", f"{opt:.3f}")):
+                side.text(x + (0.11 if x == x0 else 0.0), y, val, **txt)
+            y -= row
+        side.plot([x0, 0.98], [y, y], **rule)
+        y -= 0.3 * row
+        means = ("Mean", f"{np.nanmean([a[1] for a in ate]):.3f}", f"{np.nanmean([a[2] for a in ate]):.3f}")
+        for x, val in zip(cols, means):
+            side.text(x + (0.11 if x == x0 else 0.0), y, val, weight="bold", **txt)
+        y -= 2.2 * row
+
+        # Section 2: line styles and markers.
+        heading("Trajectory")
+        ink = "0.2"
+        style_handles = [Line2D([], [], color=ink, **{k: v for k, v in s.items() if k != "label"}, label=s["label"]) for s in _STYLE.values()]
+        style_handles += [
+            Line2D([], [], ls="", marker="o", ms=6.5, mfc="white", mec=ink, mew=1.1, label="Initial pose"),
+            Line2D([], [], ls="", marker="o", ms=3.6, mfc=ink, mec=ink, label="Final pose"),
+        ]
+        if n_lc:
+            style_handles.append(Line2D([], [], color="0.55", lw=0.6, label="Inter-robot loop closure"))
+        leg = side.legend(handles=style_handles, loc="upper left", bbox_to_anchor=(x0 - 0.035, y + 0.3 * row), fontsize=8.5,
+                          handlelength=2.6, borderaxespad=0.0, labelspacing=0.45)
+        fig.canvas.draw()
+        y = leg.get_window_extent().transformed(side.transAxes.inverted()).y0 - 2.0 * row
+
+        # Section 3: setup.
+        heading("Setup")
+        for key, value in _setup_lines(result, scene):
+            side.text(x0, y, key, color="0.35", **txt)
+            side.text(x0 + 0.34, y, value, **txt)
+            y -= row
+
+        fig.savefig(path, dpi=300)
+        plt.close(fig)
 
 
 def plot_loop_closures(result: Evaluation, streams: list[CameraStream], path: str | Path, max_pairs: int = 6) -> bool:

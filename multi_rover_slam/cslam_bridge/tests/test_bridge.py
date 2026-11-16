@@ -86,6 +86,16 @@ def test_drift_grows_with_distance():
     assert err[0] == 0.0 and err[50] > 0.0 and err[-1] > 5 * err[50]
 
 
+def test_random_yaw_drift_depends_on_seed():
+    poses = np.array([_pose(0.1 * k, 0.0, 0.0) for k in range(200)])
+    a = drifted_odometry(poses, yaw_sigma_deg_per_m=5.0, seed=0)
+    b = drifted_odometry(poses, yaw_sigma_deg_per_m=5.0, seed=1)
+    np.testing.assert_allclose(a, drifted_odometry(poses, yaw_sigma_deg_per_m=5.0, seed=0))
+    assert not np.allclose(a[-1], b[-1])
+    truth = np.linalg.inv(poses[0]) @ poses
+    assert np.linalg.norm(a[-1, :3, 3] - truth[-1, :3, 3]) > 0.0
+
+
 def test_key_round_trip():
     key = encode_key(3, 1234)
     assert key == 7441072484322903250  # gtsam::LabeledSymbol('g', 'D', 1234): char << 56 | label << 48 | index

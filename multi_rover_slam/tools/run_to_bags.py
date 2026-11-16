@@ -28,6 +28,7 @@ def main() -> None:
                         help="vo: no odometry in the bags (RTAB-Map computes it); gt_drift: ground truth + drift")
     parser.add_argument("--drift-trans", type=float, default=0.02, help="translation noise std as a fraction of the distance driven per frame [-]")
     parser.add_argument("--drift-yaw", type=float, default=0.5, help="heading bias [deg per metre driven]")
+    parser.add_argument("--drift-yaw-sigma", type=float, default=0.5, help="heading noise std, drawn per frame [deg per metre driven]")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
@@ -36,7 +37,8 @@ def main() -> None:
         odometry = None
         if args.odom == "gt_drift":
             odometry = drifted_odometry(stream.poses, trans_sigma=args.drift_trans,
-                                        yaw_bias_deg_per_m=args.drift_yaw, seed=args.seed + stream.robot_id)
+                                        yaw_bias_deg_per_m=args.drift_yaw,
+                                        yaw_sigma_deg_per_m=args.drift_yaw_sigma, seed=args.seed + stream.robot_id)
         path = write_bag(stream, run_dir / "bags" / f"r{stream.robot_id}", odometry)
         print(f"{stream.label} -> {path} ({len(stream)} frames)")
 

@@ -4,9 +4,6 @@ rovers:
   - type: leo_rover
   - type: leo_rover
   - type: leo_rover
-  - type: leo_rover
-  - type: leo_rover
-  - type: leo_rover
 
 terrain:
   kind: moon_surface
@@ -18,7 +15,7 @@ terrain:
 
 layout:
   kind: ring # LAYOUT_KINDS = ("ring", "line", "grid", "random", "explicit")
-  spacing_m: 2.5
+  spacing_m: 1.5
   heading: tangent # HEADINGS = ("chain", "tangent", "center", "random")
   positions: null
   spawn_clearance_m: 0.5
@@ -43,7 +40,7 @@ overseer:
   orbit_deg_per_s: 0.0 #6.0
 
 sim:
-  steps: 1500
+  steps: 6000
   settle_steps: 60
   warmup_steps: 8
   seed: 0
