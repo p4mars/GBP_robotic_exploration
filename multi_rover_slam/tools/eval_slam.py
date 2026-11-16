@@ -12,6 +12,8 @@ import argparse
 import sys
 from pathlib import Path
 
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # multi_rover_slam/
 
 from cslam_bridge import load_run  # noqa: E402
@@ -34,7 +36,9 @@ def main() -> None:
         print(f"{'r%d' % t.robot_id:>5} {len(t.keys):>9} {t.ate_odometry:>12.3f} {t.ate_optimized:>11.3f}")
 
     write_ate_csv(result, slam_dir / "ate.csv")
-    plot_trajectories(result, slam_dir / "trajectories.png")
+    scene_path = run_dir / "scene.yaml"
+    scene = yaml.safe_load(scene_path.read_text()) if scene_path.is_file() else None
+    plot_trajectories(result, slam_dir / "trajectories.png", scene)
     outputs = ["ate.csv", "trajectories.png"]
     if plot_loop_closures(result, streams, slam_dir / "loop_closures.png"):
         outputs.append("loop_closures.png")
