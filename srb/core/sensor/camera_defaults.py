@@ -89,3 +89,17 @@ def camera_clipping_range_fill(
     if current is not None and float(current[1]) < RENDER_DEFAULT_FAR_PLANE_M:
         return None
     return resolved
+
+
+def focal_length_for_hfov(horizontal_aperture: float, hfov_deg: float) -> float:
+    """Pinhole focal length giving ``hfov_deg`` for a given horizontal aperture.
+
+    The result is in the aperture's units. A pinhole camera cannot reach 180
+    degrees, so ``hfov_deg`` must lie strictly inside ``(0, 180)``.
+    """
+    hfov = float(hfov_deg)
+    if not (math.isfinite(hfov) and 0.0 < hfov < 180.0):
+        raise InvalidInputError(
+            f"camera_hfov_deg must lie strictly between 0 and 180, got {hfov_deg!r}"
+        )
+    return float(horizontal_aperture) / (2.0 * math.tan(math.radians(hfov) / 2.0))

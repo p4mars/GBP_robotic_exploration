@@ -294,3 +294,33 @@ def test_recorder_writes_frames(tmp_path):
 
 def test_depth_png16_clips():
     assert depth_to_png16(np.array([np.nan, -1.0, 100.0]))[2] == 65535
+
+
+#################
+## Camera HFOV ##
+#################
+
+
+def _camera_defaults():
+    """Load SRB's Isaac-free ``camera_defaults`` without importing ``srb.core.sensor``."""
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[3] / "srb" / "core" / "sensor" / "camera_defaults.py"
+    spec = importlib.util.spec_from_file_location("_srb_camera_defaults", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("hfov, expected", [(90.0, 10.4775), (120.0, 6.0492), (47.1686, 24.0)])
+def test_focal_length_for_hfov(hfov, expected):
+    focal = _camera_defaults().focal_length_for_hfov(20.955, hfov)
+    assert focal == pytest.approx(expected, rel=1e-3)
+    # fx at 640 px must match what Isaac Lab reports: width * focal / aperture
+    assert 640 * focal / 20.955 == pytest.approx(320.0 / math.tan(math.radians(hfov) / 2.0), rel=1e-6)
+
+
+@pytest.mark.parametrize("hfov", [0.0, 180.0, -10.0, float("nan")])
+def test_focal_length_for_hfov_rejects_out_of_range(hfov):
+    with pytest.raises(ValueError):
+        _camera_defaults().focal_length_for_hfov(20.955, hfov)

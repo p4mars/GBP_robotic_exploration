@@ -211,6 +211,7 @@ class MultiRoverSetup:
                 SensorCategory.VISUAL,
             },
             camera_resolution=tuple(int(v) for v in cfg.cameras.resolution),
+            camera_hfov_deg=cfg.cameras.hfov_deg,
             camera_data_types=("rgb", "depth"),
             env_sensor_cfgs=env_sensor_cfgs,
             truncate_episodes=False,
@@ -220,7 +221,7 @@ class MultiRoverSetup:
             asset_cfg = getattr(env_cfg.scene, rover.key)
             asset_cfg.init_state.rot = tuple(float(v) for v in quat_xyzw_from_yaw(yaw)[0])
         if cfg.cameras.hfov_deg is not None:
-            self._set_rover_fov(env_cfg, cfg.cameras.hfov_deg)
+            logger.info("rover cameras: %.1f deg HFOV (applied by SRB camera_hfov_deg)", cfg.cameras.hfov_deg)
         # Keep Fabric on: with `use_fabric=False` PhysX re-reads the USD spawn pose on the
         # first step and the terrain placement in `place_on_terrain` is lost.
         env_cfg.sim.log_dir = str(self.run_dir)
@@ -231,20 +232,6 @@ class MultiRoverSetup:
         env_cfg.viewer.lookat = tuple(float(v) for v in center)
         self.env_cfg = env_cfg
         return env_cfg
-
-    def _set_rover_fov(self, env_cfg, hfov_deg: float) -> None:
-        """Widen/narrow every rover camera lens to ``hfov_deg`` (keeps the aperture)."""
-        from srb.core.sensor import CameraCfg
-
-        keys = [f"/{rover.key}/" for rover in self.rovers]
-        for name, sensor_cfg in vars(env_cfg.scene).items():
-            spawn = getattr(sensor_cfg, "spawn", None)
-            if not isinstance(sensor_cfg, CameraCfg) or not hasattr(spawn, "horizontal_aperture"):
-                continue
-            if not any(key in sensor_cfg.prim_path for key in keys):
-                continue
-            spawn.focal_length = spawn.horizontal_aperture / (2.0 * math.tan(math.radians(hfov_deg) / 2.0))
-            logger.info("%s: focal length %.2f mm for %.0f deg HFOV", name, spawn.focal_length, hfov_deg)
 
     def build_env(self) -> None:
         import gymnasium

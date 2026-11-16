@@ -463,6 +463,15 @@ class BaseEnvCfg:
     beyond it and RGB does not render geometry past it. Orbital environments set
     task-sized values (``srb/core/env/mobile/orbital/env.py``).
     """
+    camera_hfov_deg: float | None = None
+    """Horizontal field of view (degrees) for robot-mounted VISUAL pinhole cameras.
+
+    Keeps each camera's ``horizontal_aperture`` and derives ``focal_length`` from
+    it; the vertical FOV follows from the image aspect ratio. Environment-level
+    cameras (``env_sensor_cfgs``) keep their own lens. ``None`` (default) leaves
+    every lens unchanged. Applied while sensors are wired, so it survives
+    :meth:`finalize`, unlike edits made to ``scene`` camera entries afterwards.
+    """
     camera_rerender_on_reset: bool = True
     """Re-render once after a reset when VISUAL or EVENT_CAMERA sensors are active.
 
@@ -1350,7 +1359,10 @@ class BaseEnvCfg:
         import re
 
         from srb.core.sensor import CameraCfg, FrameTransformerCfg, SensorBaseCfg
-        from srb.core.sensor.camera_defaults import camera_clipping_range_fill
+        from srb.core.sensor.camera_defaults import (
+            camera_clipping_range_fill,
+            focal_length_for_hfov,
+        )
         from srb.core.sensor.category import SensorCategory, get_sensor_category
         from srb.core.sensor.event_camera.config import EventCameraCfg
         from srb.core.sensor.event_camera.materialization import (
@@ -1535,6 +1547,16 @@ class BaseEnvCfg:
                     )
                     if _clipping is not None:
                         _spawn.clipping_range = _clipping
+                if (
+                    self.camera_hfov_deg is not None
+                    and is_robot_sensor
+                    and _spawn is not None
+                    and getattr(_spawn, "projection_type", "pinhole") == "pinhole"
+                    and getattr(_spawn, "horizontal_aperture", None) is not None
+                ):
+                    _spawn.focal_length = focal_length_for_hfov(
+                        _spawn.horizontal_aperture, self.camera_hfov_deg
+                    )
 
             # Namespace for extra robots
             if robot_name != "robot":

@@ -217,7 +217,7 @@ def plot_trajectories(result: Evaluation, path: str | Path) -> None:
         ax.grid(alpha=0.3)
     axes[0].set_ylabel("y [m]")
     axes[0].legend(loc="best", fontsize=8)
-    fig.tight_layout()
+    # fig.tight_layout()
     fig.savefig(path, dpi=120)
     plt.close(fig)
 
