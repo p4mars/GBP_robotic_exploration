@@ -1,9 +1,9 @@
 rovers:
-  - type: cadre
-  - type: cadre
-  - type: cadre
-  - type: cadre
-  - type: cadre
+  - type: leo_rover
+  - type: leo_rover
+  - type: leo_rover
+  - type: leo_rover
+  - type: leo_rover
 
 terrain:
   kind: moon_surface
@@ -14,14 +14,14 @@ terrain:
   augment: none
 
 layout:
-  kind: ring
-  spacing_m: 3.0
-  heading: chain
+  kind: ring # LAYOUT_KINDS = ("ring", "line", "grid", "random", "explicit")
+  spacing_m: 2.5
+  heading: center # HEADINGS = ("chain", "tangent", "center", "random")
   positions: null
   spawn_clearance_m: 0.3
 
 motion:
-  kind: wander
+  kind: wander # MOTION_KINDS = ("follow", "orbit", "wander", "constant", "idle")
   speed_mps: 0.25
   cmd: [0.2, 0.0]
 
@@ -31,21 +31,21 @@ cameras:
   depth_format: png16
 
 overseer:
-  mode: fixed
-  resolution: [1920, 1080]
-  distance_m: null
-  height_m: 1.5 #null
-  azimuth_deg: -100.0 #-120.0
+  mode: track #fixed
+  resolution: [1280, 720] #[1920, 1080]
+  distance_m: 0.01
+  height_m: 12.0 #null
+  azimuth_deg: -90.0
   focal_length: 10.0 #18.0
   orbit_deg_per_s: 0.0 #6.0
 
 sim:
-  steps: 250
+  steps: 500
   settle_steps: 60
   warmup_steps: 8
   seed: 0
   headless: true
-  quality: quality
+  quality: performance
   skydome: high_res
   sun_rpy: [45.0, 30.0, 0.0]
   kit_args: ""
@@ -53,6 +53,6 @@ sim:
 output:
   root: swarm_slam/out/multi_rover_setup
   name: null              # replaces the descriptive part of the run folder name
-  record_every: 25         # agent steps between saved frames (5 -> 5 Hz)
+  record_every: 2         # agent steps between saved frames (5 -> 5 Hz)
   video: false
   snapshot_only: false
