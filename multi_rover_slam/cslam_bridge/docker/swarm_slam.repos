@@ -1,4 +1,5 @@
-# Swarm-SLAM packages pinned to the upstream HEAD of 2026-11-03 (Jazzy support: cslam PR #34).
+# Swarm-SLAM packages, pinned to the upstream HEAD of 2026-11-03 (Jazzy support: cslam PR #34).
+# Used for rosdep in the image and to clone multi_rover_slam/swarm_slam/ (cslam: switch the URL to our fork).
 repositories:
   cslam:
     type: git

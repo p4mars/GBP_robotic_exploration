@@ -1,6 +1,6 @@
 """Draw the offline/online multi-rover SLAM architecture as a PNG for slides.
 
-    python3 swarm_slam/docs/architecture_diagram.py   ->  swarm_slam/docs/slam_architecture.png
+    python3 multi_rover_slam/docs/architecture_diagram.py   ->  multi_rover_slam/docs/slam_architecture.png
 """
 
 from pathlib import Path

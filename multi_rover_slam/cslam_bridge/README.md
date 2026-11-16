@@ -16,26 +16,35 @@ multi_rover_setup.py ──> <run>/ ──> run_to_bags.py ──> <run>/bags/r<
 1. Record a run at 12.5 Hz in the SRB container:
 
    ```bash
-   python3 swarm_slam/tools/multi_rover_setup.py --config swarm_slam/multi_rover_setup/presets/slam_playground.yaml
+   python3 multi_rover_slam/tools/multi_rover_setup.py --config multi_rover_slam/multi_rover_setup/presets/slam_playground.yaml
    ```
 
-2. Run the remaining steps in the Swarm-SLAM container (`swarm_slam/cslam_bridge/docker/run.bash`). Set the run folder:
+2. Run the remaining steps in the Swarm-SLAM container (`multi_rover_slam/cslam_bridge/docker/run.bash`).
+   The image holds only dependencies; the Swarm-SLAM source is `multi_rover_slam/swarm_slam/`
+   (editable, `cslam` is our fork). Build it once, and again after editing it:
 
    ```bash
-   RUN=swarm_slam/out/multi_rover_setup/latest
+   (cd multi_rover_slam/swarm_slam && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release)
+   source multi_rover_slam/swarm_slam/install/setup.bash   # new shells source it automatically
+   ```
+
+   Set the run folder:
+
+   ```bash
+   RUN=multi_rover_slam/out/multi_rover_setup/latest
    ```
 
 3. Choose an odometry source. Convert the bags to match, then launch with the same mode:
 
    | Odometry | Convert | Launch |
    |---|---|---|
-   | Visual odometry (RTAB-Map) | `python3 swarm_slam/tools/run_to_bags.py $RUN` | `ros2 launch swarm_slam/cslam_bridge/launch/srb_rgbd.launch.py run_dir:=$RUN` |
-   | Fallback: ground truth + drift (`--drift-trans 0` makes it exact) | `python3 swarm_slam/tools/run_to_bags.py $RUN --odom gt_drift` | `ros2 launch swarm_slam/cslam_bridge/launch/srb_rgbd.launch.py run_dir:=$RUN odom:=bag` |
+   | Visual odometry (RTAB-Map) | `python3 multi_rover_slam/tools/run_to_bags.py $RUN` | `ros2 launch multi_rover_slam/cslam_bridge/launch/srb_rgbd.launch.py run_dir:=$RUN` |
+   | Fallback: ground truth + drift (`--drift-trans 0` makes it exact) | `python3 multi_rover_slam/tools/run_to_bags.py $RUN --odom gt_drift` | `ros2 launch multi_rover_slam/cslam_bridge/launch/srb_rgbd.launch.py run_dir:=$RUN odom:=bag` |
 
 4. Evaluate:
 
    ```bash
-   python3 swarm_slam/tools/eval_slam.py $RUN
+   python3 multi_rover_slam/tools/eval_slam.py $RUN
    ```
 
 While the launch runs, `ros2 topic echo /cslam/inter_robot_loop_closure` shows the loop-closure
@@ -77,5 +86,5 @@ How the ATE is aligned to ground truth:
 The tests need neither Isaac nor ROS; `rosbags` must be installed for the bag round trip.
 
 ```bash
-python3 -m pytest swarm_slam/cslam_bridge/tests -q
+python3 -m pytest multi_rover_slam/cslam_bridge/tests -q
 ```

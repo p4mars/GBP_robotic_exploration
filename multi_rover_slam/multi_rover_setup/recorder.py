@@ -48,7 +48,7 @@ def _slug(text: str) -> str:
 def make_run_dir(root: str | Path, tag: str, *, now: datetime | None = None) -> Path:
     """Create ``<root>/<stamp>__<tag>`` (unique) and point ``<root>/latest`` at it.
 
-    A relative ``root`` is taken relative to the repository (parent of ``swarm_slam/``).
+    A relative ``root`` is taken relative to the repository (parent of ``multi_rover_slam/``).
     """
     root = Path(root)
     if not root.is_absolute():

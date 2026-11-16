@@ -5,7 +5,7 @@ Per rover: cslam's three nodes, optionally RTAB-Map RGB-D visual odometry, and
 stamps) go to ``<run_dir>/slam``. The launch shuts down ``linger_s`` after the
 last bag finished, which leaves time for a final pose graph optimization.
 
-    ros2 launch swarm_slam/cslam_bridge/launch/srb_rgbd.launch.py run_dir:=<run> [odom:=vo|bag]
+    ros2 launch multi_rover_slam/cslam_bridge/launch/srb_rgbd.launch.py run_dir:=<run> [odom:=vo|bag]
 
 odom:=vo   RTAB-Map rgbd_odometry on the replayed images (bags written with --odom vo)
 odom:=bag  odometry recorded in the bags (bags written with --odom gt_drift)

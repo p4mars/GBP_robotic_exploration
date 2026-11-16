@@ -7,7 +7,7 @@ created: 2026-11-10
 
 Replays a `multi_rover_setup` run through MISTLab Swarm-SLAM (`cslam`, ROS 2 Jazzy) and evaluates the merged map against ground truth.
 
-Code: `swarm_slam/cslam_bridge/` (branch `gbp`), details in `swarm_slam/cslam_bridge/README.md`.
+Code: `multi_rover_slam/cslam_bridge/` (branch `gbp`), details in `multi_rover_slam/cslam_bridge/README.md`.
 
 ## Prerequisites
 
@@ -19,24 +19,31 @@ A run recorded for SLAM:
 First proper run: `2026-11-10_15-50-20__moon_surface__5rovers__orbit__640x480` (5 rovers, orbit, 1000 steps = 40 s).
 
 > [!info] Docker image
-> `swarm_slam_cslam:jazzy` already contains RTAB-Map, rosbags, matplotlib and the CosPlace weights.
+> `swarm_slam_cslam:jazzy` contains ROS 2, RTAB-Map, rosbags, matplotlib and the CosPlace weights; Swarm-SLAM itself is built from `multi_rover_slam/swarm_slam/`.
 
 ## 1. Start the Swarm-SLAM container
 
 On the host, from the repo root (mounts the repo at `/root/ws`):
 
 ```bash
-./swarm_slam/cslam_bridge/docker/run.bash
+./multi_rover_slam/cslam_bridge/docker/run.bash
 ```
 
 Run everything below **inside** the container.
+
+First time, and after editing `multi_rover_slam/swarm_slam/` (sources are on the host, not in the image):
+
+```bash
+(cd multi_rover_slam/swarm_slam && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release)
+source multi_rover_slam/swarm_slam/install/setup.bash
+```
 
 ## 2. Set the run folder
 
 Use the exact name, not `latest`, because `latest` moves to whatever you record next.
 
 ```bash
-RUN=swarm_slam/out/multi_rover_setup/2026-11-10_15-50-20__moon_surface__5rovers__orbit__640x480
+RUN=multi_rover_slam/out/multi_rover_setup/2026-11-10_15-50-20__moon_surface__5rovers__orbit__640x480
 ```
 
 ## 3a. First pass: check the pipeline with exact ground-truth odometry
@@ -44,15 +51,15 @@ RUN=swarm_slam/out/multi_rover_setup/2026-11-10_15-50-20__moon_surface__5rovers_
 Takes visual odometry out of the picture, so any failure comes from topics, frames or timestamps.
 
 ```bash
-python3 swarm_slam/tools/run_to_bags.py $RUN --odom gt_drift --drift-trans 0
+python3 multi_rover_slam/tools/run_to_bags.py $RUN --odom gt_drift --drift-trans 0
 ```
 
 ```bash
-ros2 launch swarm_slam/cslam_bridge/launch/srb_rgbd.launch.py run_dir:=$RUN odom:=bag
+ros2 launch multi_rover_slam/cslam_bridge/launch/srb_rgbd.launch.py run_dir:=$RUN odom:=bag
 ```
 
 ```bash
-python3 swarm_slam/tools/eval_slam.py $RUN
+python3 multi_rover_slam/tools/eval_slam.py $RUN
 ```
 
 ## 3b. Second pass: the real test with RTAB-Map visual odometry
@@ -60,15 +67,15 @@ python3 swarm_slam/tools/eval_slam.py $RUN
 Rewrites the bags without `/odom` (replaces the ones from 3a); RTAB-Map's `rgbd_odometry` computes the odometry during replay.
 
 ```bash
-python3 swarm_slam/tools/run_to_bags.py $RUN
+python3 multi_rover_slam/tools/run_to_bags.py $RUN
 ```
 
 ```bash
-ros2 launch swarm_slam/cslam_bridge/launch/srb_rgbd.launch.py run_dir:=$RUN
+ros2 launch multi_rover_slam/cslam_bridge/launch/srb_rgbd.launch.py run_dir:=$RUN
 ```
 
 ```bash
-python3 swarm_slam/tools/eval_slam.py $RUN
+python3 multi_rover_slam/tools/eval_slam.py $RUN
 ```
 
 ## What to expect and watch

@@ -1,4 +1,4 @@
-"""Isaac-free, ROS-free tests: python3 -m pytest swarm_slam/cslam_bridge/tests -q"""
+"""Isaac-free, ROS-free tests: python3 -m pytest multi_rover_slam/cslam_bridge/tests -q"""
 
 import json
 import sys
@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # swarm_slam/
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # multi_rover_slam/
 
 from cslam_bridge.evaluate import (  # noqa: E402
     decode_key,
@@ -111,7 +111,8 @@ def _write_slam_logs(slam_dir: Path, streams, offset: np.ndarray):
         for kf, k in enumerate(range(0, len(s), 3)):
             key = encode_key(s.robot_id, kf)
             T = offset @ s.poses[k]
-            vertices.append(f"VERTEX_SE3:QUAT {key} {' '.join(map(str, T[:3, 3]))} {' '.join(map(str, matrix_to_quat_xyzw(T[:3, :3])))}")
+            g2o_key = key & ((1 << 56) - 1)  # cslam's g2o files drop the 'g' char byte; the stamps keep it
+            vertices.append(f"VERTEX_SE3:QUAT {g2o_key} {' '.join(map(str, T[:3, 3]))} {' '.join(map(str, matrix_to_quat_xyzw(T[:3, :3])))}")
             if kf:
                 edges.append(f"EDGE_SE3:QUAT {encode_key(s.robot_id, kf - 1)} {key} 0 0 0 0 0 0 1")
             sec = int(s.stamps[k])

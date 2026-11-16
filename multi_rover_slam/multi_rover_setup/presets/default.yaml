@@ -55,7 +55,7 @@ sim:
   kit_args: ""
 
 output:
-  root: swarm_slam/out/multi_rover_setup
+  root: multi_rover_slam/out/multi_rover_setup
   name: null              # replaces the descriptive part of the run folder name
   record_every: 5         # agent steps between saved frames (5 -> 5 Hz)
   video: false

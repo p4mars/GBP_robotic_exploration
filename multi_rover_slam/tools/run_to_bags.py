@@ -5,16 +5,16 @@ Writes <run>/bags/r<id>/ with /r<id>/color/image, /r<id>/depth/image,
 /r<id>/color/camera_info and, with --odom gt_drift, /r<id>/odom.
 
 Usage (from /root/ws in the Swarm-SLAM container, or anywhere with `rosbags` installed):
-    python3 swarm_slam/tools/run_to_bags.py swarm_slam/out/multi_rover_setup/latest              # for odom:=vo
-    python3 swarm_slam/tools/run_to_bags.py <run> --odom gt_drift --drift-trans 0                # GT odometry
-    python3 swarm_slam/tools/run_to_bags.py <run> --odom gt_drift --drift-trans 0.02 --drift-yaw 0.5
+    python3 multi_rover_slam/tools/run_to_bags.py multi_rover_slam/out/multi_rover_setup/latest              # for odom:=vo
+    python3 multi_rover_slam/tools/run_to_bags.py <run> --odom gt_drift --drift-trans 0                # GT odometry
+    python3 multi_rover_slam/tools/run_to_bags.py <run> --odom gt_drift --drift-trans 0.02 --drift-yaw 0.5
 """
 
 import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # swarm_slam/
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # multi_rover_slam/
 
 from cslam_bridge import load_run  # noqa: E402
 from cslam_bridge.bags import write_bag  # noqa: E402

@@ -8,7 +8,7 @@ by Andrej Orsula.
 **Status:** early research prototype (TU Delft). The multi-rover lunar setup
 runs; the C-SLAM bridge is generated but still untested. Expect breaking changes.
 
-- Own work: [`swarm_slam/`](swarm_slam/)
+- Own work: [`multi_rover_slam/`](multi_rover_slam/)
 - Upstream SRB docs: <https://andrejorsula.github.io/space_robotics_bench>
 
 ## License

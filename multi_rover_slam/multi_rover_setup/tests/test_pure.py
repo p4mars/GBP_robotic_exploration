@@ -1,4 +1,4 @@
-"""Isaac-free tests: python3 -m pytest swarm_slam/multi_rover_setup/tests -q"""
+"""Isaac-free tests: python3 -m pytest multi_rover_slam/multi_rover_setup/tests -q"""
 
 import math
 import sys
@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # swarm_slam/
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # multi_rover_slam/
 
 from multi_rover_setup.cameras import MountedPose, OverseerRig, matrix_to_quat_xyzw, project_points, quat_xyzw_to_matrix, visibility  # noqa: E402
 from multi_rover_setup.config import (  # noqa: E402

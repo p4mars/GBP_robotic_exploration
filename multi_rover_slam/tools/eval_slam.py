@@ -5,14 +5,14 @@ Writes into <run>/slam/: trajectories.png (GT / odometry / optimized, top-down),
 loop_closures.png (image pairs of inter-robot loop closures) and ate.csv.
 
 Usage (from /root/ws):
-    python3 swarm_slam/tools/eval_slam.py swarm_slam/out/multi_rover_setup/latest
+    python3 multi_rover_slam/tools/eval_slam.py multi_rover_slam/out/multi_rover_setup/latest
 """
 
 import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # swarm_slam/
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # multi_rover_slam/
 
 from cslam_bridge import load_run  # noqa: E402
 from cslam_bridge.evaluate import evaluate, plot_loop_closures, plot_trajectories, write_ate_csv  # noqa: E402

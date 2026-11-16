@@ -5,7 +5,9 @@ estimates, ``<log_folder>/<date>_experiment_robot_<id>/<date>/`` containing
 ``pose_timestamps<id>.csv`` (vertex key -> odometry stamp) and, on the robot
 that ran the optimization, ``initial_global_pose_graph.g2o`` (odometry only)
 and ``optimized_global_pose_graph.g2o``. Vertex keys are GTSAM
-``LabeledSymbol('g', 'A' + robot_id, keyframe_id)``.
+``LabeledSymbol('g', 'A' + robot_id, keyframe_id)``, but the g2o files drop the
+``'g'`` byte while ``pose_timestamps*.csv`` keeps it, so both readers pass keys
+through :func:`normalize_key`.
 """
 
 from __future__ import annotations
@@ -27,6 +29,11 @@ def decode_key(key: int) -> tuple[int, int]:
     """GTSAM ``LabeledSymbol`` key -> ``(robot_id, keyframe_id)``."""
     label = (key >> _INDEX_BITS) & 0xFF
     return label - ord("A"), key & ((1 << _INDEX_BITS) - 1)
+
+
+def normalize_key(key: int) -> int:
+    """Canonical key with the ``'g'`` char byte, whether or not the source wrote it."""
+    return (ord("g") << 56) | (key & ((1 << 56) - 1))
 
 
 def encode_key(robot_id: int, keyframe_id: int) -> int:
@@ -56,16 +63,16 @@ def read_g2o(path: str | Path) -> PoseGraph:
             pose = np.eye(4)
             pose[:3, :3] = quat_xyzw_to_matrix((qx, qy, qz, qw))
             pose[:3, 3] = (x, y, z)
-            graph.vertices[int(parts[1])] = pose
+            graph.vertices[normalize_key(int(parts[1]))] = pose
         elif parts[0] == "EDGE_SE3:QUAT":
-            graph.edges.append((int(parts[1]), int(parts[2])))
+            graph.edges.append((normalize_key(int(parts[1])), normalize_key(int(parts[2]))))
     return graph
 
 
 def read_pose_timestamps(path: str | Path) -> dict[int, float]:
     """``pose_timestamps<id>.csv`` -> {vertex key: stamp [s]}."""
     with open(path, newline="") as f:
-        return {int(row["vertice_id"]): int(row["sec"]) + int(row["nanosec"]) * 1e-9 for row in csv.DictReader(f)}
+        return {normalize_key(int(row["vertice_id"])): int(row["sec"]) + int(row["nanosec"]) * 1e-9 for row in csv.DictReader(f)}
 
 
 def latest_logs(slam_dir: str | Path) -> tuple[Path, dict[int, float]]:

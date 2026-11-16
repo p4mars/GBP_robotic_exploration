@@ -1,4 +1,4 @@
-# playground.yaml tuned for Swarm-SLAM replay (see swarm_slam/cslam_bridge/README.md).
+# playground.yaml tuned for Swarm-SLAM replay (see multi_rover_slam/cslam_bridge/README.md).
 # Lines marked `# SLAM:` differ from playground.yaml; presets do not inherit, so the rest is copied.
 rovers:                   # SLAM: 3 instead of 5 rovers keeps the first run cheap
   - type: cadre
@@ -51,7 +51,7 @@ sim:
   kit_args: ""
 
 output:
-  root: swarm_slam/out/multi_rover_setup
+  root: multi_rover_slam/out/multi_rover_setup
   name: null
   record_every: 2         # SLAM: 12.5 Hz (~2 cm between frames) so visual odometry can track
   video: false

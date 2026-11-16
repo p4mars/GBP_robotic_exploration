@@ -4,7 +4,7 @@
 Every `obs/image_*` key is exported, so a 3rd-person camera shows up
 automatically once it is recorded (e.g. `image_3rd` / `image_scene`).
 
-Usage (from swarm_slam/):
+Usage (from multi_rover_slam/):
     python3 tools/extract_views.py                 # latest log, frame 50
     python3 tools/extract_views.py -f 0 50 99      # several frames
     python3 tools/extract_views.py -f all -d demo_0
@@ -19,7 +19,7 @@ import h5py
 import numpy as np
 from PIL import Image
 
-HERE = Path(__file__).resolve().parent.parent  # swarm_slam/
+HERE = Path(__file__).resolve().parent.parent  # multi_rover_slam/
 LOGS = HERE.parent / "logs"
 
 
