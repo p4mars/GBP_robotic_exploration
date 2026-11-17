@@ -21,14 +21,14 @@ from multi_rover_setup.config import (  # noqa: E402
     parse_cli,
 )
 from multi_rover_setup.layout import (  # noqa: E402
-    MotionController,
     normalize_commands,
     quat_xyzw_from_yaw,
     spawn_layout,
     wrap_angle,
     yaw_from_quat_xyzw,
 )
-from multi_rover_setup.recorder import Recorder, depth_to_png16, make_run_dir, run_tag, write_scene_yaml  # noqa: E402
+from multi_rover_setup.motion import MotionController  # noqa: E402
+from multi_rover_setup.recorder import Recorder, depth_to_png16, make_run_dir, rename_run_dir, run_tag, write_scene_yaml  # noqa: E402
 from multi_rover_setup.terrain import TerrainHeightField  # noqa: E402
 
 
@@ -181,6 +181,53 @@ def test_wander_stays_in_bounds():
     assert np.linalg.norm(poses[:, :2], axis=-1).max() < 12.0
 
 
+def _min_pair_distance(controller, poses, steps, dt):
+    closest = np.inf
+    for _ in range(steps):
+        poses = _simulate(controller, poses, 1, dt)
+        dists = np.linalg.norm(poses[:, None, :2] - poses[None, :, :2], axis=-1) + np.eye(len(poses)) * 1e9
+        closest = min(closest, dists.min())
+    return closest
+
+
+@pytest.mark.parametrize("avoid", [False, True])
+def test_collision_avoidance_head_on(avoid):
+    dt = 0.08
+    controller = MotionController(
+        MotionCfg(kind="constant", cmd=[0.3, 0.0], collision_avoidance=avoid), center=np.zeros(2), radius=3.0,
+        bound_m=20.0, max_lin=np.full(2, 0.5), max_ang=np.full(2, 1.0), dt=dt, radii=0.4,
+    )
+    closest = _min_pair_distance(controller, np.array([[-5.0, 0.0, 0.0], [5.0, 0.0, np.pi]]), 600, dt)
+    if avoid:
+        assert closest > 0.8 + 0.3  # footprints (2 x 0.4 m) plus most of the margin
+    else:
+        assert closest < 0.8
+
+
+def test_collision_avoidance_keeps_wandering_swarm_apart():
+    dt, n = 0.08, 6
+    poses = spawn_layout(n, LayoutCfg(kind="ring", spacing_m=2.0, heading="random"), seed=2)
+    controller = MotionController(
+        MotionCfg(kind="wander", speed_mps=0.25, collision_avoidance=True), center=np.zeros(2), radius=2.0,
+        bound_m=6.0, max_lin=np.full(n, 0.5), max_ang=np.full(n, 1.0), dt=dt, radii=0.4, seed=3,
+    )
+    start = poses.copy()
+    assert _min_pair_distance(controller, poses, 5000, dt) > 0.8 + 0.3
+    assert np.linalg.norm(poses[:, :2] - start[:, :2], axis=-1).min() > 1.0  # nobody froze in place
+
+
+def test_collision_avoidance_config(tmp_path):
+    assert MultiRoverSetupCfg.from_yaml(DEFAULT_PRESET).motion.collision_avoidance is False
+    preset = tmp_path / "scene.yaml"
+    preset.write_text("rovers: [leo_rover, leo_rover]\nmotion: {kind: wander, collision_avoidance: true}\n")
+    assert parse_cli(["--config", str(preset)]).motion.collision_avoidance is True
+    preset.write_text("rovers: [leo_rover]\n")
+    assert parse_cli(["--config", str(preset), "--collision-avoidance"]).motion.collision_avoidance is True
+    preset.write_text("rovers: [leo_rover]\nmotion: {collision_avoidance: maybe}\n")
+    with pytest.raises(ValueError, match="collision_avoidance"):
+        parse_cli(["--config", str(preset)])
+
+
 def test_normalize_commands():
     out = normalize_commands(np.array([[0.2, 0.5], [5.0, -5.0]]), np.array([0.4, 0.4]), np.array([1.0, 1.0]))
     assert np.allclose(out, [[0.5, 0.5], [1.0, -1.0]])
@@ -261,14 +308,24 @@ def test_overseer_track_and_fixed():
 def test_run_dir_naming_and_latest(tmp_path):
     cfg = MultiRoverSetupCfg.from_yaml(DEFAULT_PRESET)
     tag = run_tag(cfg)
-    assert tag == "moon_surface__3rovers__follow__640x480"
+    assert tag == "3R__follow"
+    assert run_tag(cfg, 239.6) == "3R__follow__240s"
     assert not any(r.type in tag for r in cfg.rovers)
     now = datetime(2026, 11, 2, 15, 4, 11)
     first = make_run_dir(tmp_path, tag, now=now)
     second = make_run_dir(tmp_path, tag, now=now)
-    assert first.name == "2026-11-02_15-04-11__moon_surface__3rovers__follow__640x480"
+    assert first.name == "26-11-02_15-04__3R__follow"
     assert second.name.endswith("-2")
     assert (tmp_path / "latest").resolve() == second.resolve()
+    # Finishing the older run renames it but leaves `latest` with the newer one.
+    first = rename_run_dir(first, run_tag(cfg, 12.0))
+    assert first.name == "26-11-02_15-04__3R__follow__12s" and first.is_dir()
+    assert (tmp_path / "latest").resolve() == second.resolve()
+    second = rename_run_dir(second, run_tag(cfg, 12.0))
+    assert second.name == "26-11-02_15-04__3R__follow__12s-2"
+    assert (tmp_path / "latest").resolve() == second.resolve()
+    cfg.output.snapshot_only = True
+    assert run_tag(cfg, 0.0) == "3R__follow__snap"
     cfg.output.name = "my test/run"
     assert run_tag(cfg) == "my_test_run"
 

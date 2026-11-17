@@ -4,7 +4,7 @@
 Rovers come only from the YAML config (default:
 multi_rover_slam/multi_rover_setup/presets/default.yaml); all other settings can be
 overridden here. Each run writes one folder:
-multi_rover_slam/out/multi_rover_setup/<stamp>__<terrain>__<N>rovers__<motion>__<WxH>/
+multi_rover_slam/out/multi_rover_setup/<yy-mm-dd_HH-MM>__<N>R__<motion>__<sec>s/   (or __snap)
 (`latest` links to the newest one).
 
 Usage (inside the container, from /root/ws):

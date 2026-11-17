@@ -28,6 +28,7 @@ motion:
   kind: follow            # follow (rover_0 orbits, others pursue the one ahead) | orbit | wander | constant | idle
   speed_mps: 0.25
   cmd: [0.2, 0.0]         # kind: constant -> [v m/s, w rad/s]
+  collision_avoidance: false  # true: steer around / brake for other rovers (all kinds except idle)
 
 cameras:
   resolution: [640, 480]

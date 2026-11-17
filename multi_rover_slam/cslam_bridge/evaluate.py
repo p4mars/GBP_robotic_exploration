@@ -121,7 +121,10 @@ class RobotTrack:
     odometry: np.ndarray
     """``(K, 3)`` initial (odometry-only) positions, aligned to GT per robot"""
     optimized: np.ndarray
-    """``(K, 3)`` optimized positions, aligned to GT jointly for all robots"""
+    """``(K, 3)`` optimized positions, aligned to GT jointly for all robots; empty if not merged"""
+    merged: bool = True
+    """False if cslam never merged this robot into the graph; ``gt``/``odometry`` then come
+    from the recorded run and the bag's ``/r<id>/odom`` (per frame instead of per keyframe)."""
 
     @property
     def ate_odometry(self) -> float:
@@ -134,7 +137,8 @@ class RobotTrack:
 
 @dataclass
 class Evaluation:
-    log_dir: Path
+    log_dir: Path | None
+    """Folder of the merged graph; None if no robot was ever merged."""
     tracks: list[RobotTrack]
     loop_closures: list[tuple[int, int]]
     """Inter-robot loop-closure edges (vertex keys) of the optimized graph."""
@@ -144,24 +148,69 @@ class Evaluation:
     """Transform applied to all optimized positions."""
 
 
-def evaluate(streams: list[CameraStream], slam_dir: str | Path) -> Evaluation:
+def read_bag_odometry(bag_dir: str | Path, robot_id: int) -> tuple[np.ndarray, np.ndarray]:
+    """``(stamps (N,), positions (N, 3))`` of ``/r<id>/odom`` in a bag; empty if the bag has no odometry."""
+    from rosbags.rosbag2 import Reader
+
+    from . import messages as msgs
+
+    stamps, positions = [], []
+    with Reader(bag_dir) as reader:
+        conns = [c for c in reader.connections if c.topic == msgs.topic(robot_id, "odom")]
+        for conn, _, raw in reader.messages(connections=conns):
+            msg = msgs.TYPESTORE.deserialize_cdr(raw, conn.msgtype)
+            p = msg.pose.pose.position
+            stamps.append(msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9)
+            positions.append((p.x, p.y, p.z))
+    return np.asarray(stamps), np.asarray(positions, dtype=float).reshape(-1, 3)
+
+
+def _unmerged_track(stream: CameraStream, bags_dir: Path | None) -> RobotTrack:
+    """GT of the whole run, plus the bag's odometry (aligned to GT) if the bag has any."""
+    gt = stream.poses[:, :3, 3]
+    odom = np.zeros((0, 3))
+    bag = bags_dir / f"r{stream.robot_id}" if bags_dir else None
+    if bag is not None and bag.is_dir():
+        try:
+            stamps, odom = read_bag_odometry(bag, stream.robot_id)
+        except ImportError:  # rosbags missing: plot GT only
+            stamps = np.zeros(0)
+        if len(odom):
+            gt = np.array([stream.poses[stream.nearest(t), :3, 3] for t in stamps])
+            if len(odom) >= 3:
+                odom = transform_points(umeyama(odom, gt), odom)
+    return RobotTrack(stream.robot_id, [], gt, odom if len(odom) == len(gt) else np.zeros((0, 3)), np.zeros((0, 3)), merged=False)
+
+
+def evaluate(streams: list[CameraStream], slam_dir: str | Path, bags_dir: str | Path | None = None) -> Evaluation:
     """Match keyframes to GT by stamp, align, and compute per-robot ATE.
 
     Odometry is aligned to GT robot by robot (robots share no frame before merging);
     the optimized graph is aligned with **one** transform for all robots, so a wrong
     merge shows up as a displaced robot instead of being hidden by the alignment.
+    Robots missing from the merged graph get an unmerged track (see :attr:`RobotTrack.merged`),
+    whose odometry is read from ``bags_dir`` (default ``<run>/bags``).
     """
-    log_dir, stamps = latest_logs(slam_dir)
-    optimized = read_g2o(log_dir / "optimized_global_pose_graph.g2o")
-    initial_path = log_dir / "initial_global_pose_graph.g2o"
-    initial = read_g2o(initial_path) if initial_path.exists() else optimized
+    slam_dir = Path(slam_dir)
+    bags_dir = Path(bags_dir) if bags_dir is not None else slam_dir.parent / "bags"
+    try:
+        log_dir, stamps = latest_logs(slam_dir)
+        optimized = read_g2o(log_dir / "optimized_global_pose_graph.g2o")
+        initial_path = log_dir / "initial_global_pose_graph.g2o"
+        initial = read_g2o(initial_path) if initial_path.exists() else optimized
+    except FileNotFoundError:
+        log_dir, stamps, optimized = None, {}, PoseGraph()
+        initial = optimized
 
-    raw = []
+    raw, unmerged = [], {}
     for stream in streams:
         keys = sorted(
             (k for k in optimized.vertices if decode_key(k)[0] == stream.robot_id and k in stamps),
             key=lambda k: decode_key(k)[1],
         )
+        if not keys:
+            unmerged[stream.robot_id] = _unmerged_track(stream, bags_dir)
+            continue
         gt = np.array([stream.poses[stream.nearest(stamps[k]), :3, 3] for k in keys]).reshape(-1, 3)
         odom = np.array([initial.vertices.get(k, optimized.vertices[k])[:3, 3] for k in keys]).reshape(-1, 3)
         opt = np.array([optimized.vertices[k][:3, 3] for k in keys]).reshape(-1, 3)
@@ -173,16 +222,17 @@ def evaluate(streams: list[CameraStream], slam_dir: str | Path) -> Evaluation:
     all_gt = np.concatenate([r[2] for r in raw]) if raw else np.zeros((0, 3))
     alignment = umeyama(all_opt, all_gt) if len(all_opt) >= 3 else np.eye(4)
     tracks = [RobotTrack(rid, keys, gt, odom, transform_points(alignment, opt)) for rid, keys, gt, odom, opt in raw]
+    tracks = sorted(tracks + list(unmerged.values()), key=lambda t: t.robot_id)
     return Evaluation(log_dir, tracks, optimized.inter_robot_edges(), stamps, optimized, alignment)
 
 
 def write_ate_csv(result: Evaluation, path: str | Path) -> None:
     with open(path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(("robot_id", "keyframes", "ate_odometry_m", "ate_optimized_m", "inter_robot_loop_closures"))
+        writer.writerow(("robot_id", "merged", "keyframes", "ate_odometry_m", "ate_optimized_m", "inter_robot_loop_closures"))
         for track in result.tracks:
             n_lc = sum(track.robot_id in (decode_key(a)[0], decode_key(b)[0]) for a, b in result.loop_closures)
-            writer.writerow((track.robot_id, len(track.keys), f"{track.ate_odometry:.3f}", f"{track.ate_optimized:.3f}", n_lc))
+            writer.writerow((track.robot_id, int(track.merged), len(track.keys), f"{track.ate_odometry:.3f}", f"{track.ate_optimized:.3f}", n_lc))
 
 
 #############
@@ -193,10 +243,16 @@ def write_ate_csv(result: Evaluation, path: str | Path) -> None:
 # Paul Tol's "muted" qualitative scheme: colour-blind safe, print friendly.
 ROVER_COLORS = ("#332288", "#88CCEE", "#44AA99", "#117733", "#999933", "#DDCC77", "#CC6677", "#882255", "#AA4499", "#DDDDDD")
 _STYLE = {
-    "gt": dict(ls=(0, (4.0, 1.6)), lw=0.9, alpha=1.0, label="Ground truth"),
-    "odometry": dict(ls=(0, (0.6, 1.4)), lw=1.3, alpha=1.0, label="Odometry (drifted, aligned per rover)", dash_capstyle="round"),
-    "optimized": dict(ls="-", lw=2.4, alpha=0.35, label="Swarm-SLAM optimized", solid_capstyle="round"),
+    "gt": dict(ls="-", lw=1.2, alpha=0.3, label="Ground truth"),
+    "odometry": dict(ls=(0, (0.6, 1.4)), lw=1.0, alpha=1.0, label="Odometry (drifted, aligned per rover)"),# dash_capstyle="round"),
+    "optimized": dict(ls=(0, (4.0, 1.6)), lw=1.0, alpha=1.0, label="Swarm-SLAM optimized"),# solid_capstyle="round"),
 }
+# Shared by plot and legend so both always match.
+_START = dict(ls="", marker="o", ms=3.6, mfc="white", mew=1.0)
+_END = dict(ls="", marker="o", ms=3.6, mew=0.0)
+LOOP_CLOSURE_COLOR = "red" 
+_LC_MARKER = dict(ls="", marker="o", ms=7.0, mfc="none", mec=LOOP_CLOSURE_COLOR, mew=0.8)
+_LC_LINE = dict(ls="-", lw=0.9, color=LOOP_CLOSURE_COLOR)
 _RC = {
     "font.family": "serif",
     "font.serif": ["STIXGeneral", "DejaVu Serif"],
@@ -234,6 +290,7 @@ def _setup_lines(result: Evaluation, scene: dict | None) -> list[tuple[str, str]
             w, h = cams.get("resolution", ("?", "?"))
             rows.append(("Camera", f"RGB-D {w}×{h}, {cams.get('hfov_deg', '?'):g}° HFOV"))
     rows += [
+        ("Merged rovers", f"{sum(t.merged for t in result.tracks)} / {len(result.tracks)}"),
         ("Keyframes", f"{sum(len(t.keys) for t in result.tracks)}"),
         ("Inter-robot LC", f"{len(result.loop_closures)}"),
     ]
@@ -244,7 +301,8 @@ def plot_trajectories(result: Evaluation, path: str | Path, scene: dict | None =
     """GT, odometry and optimized trajectories in one top-down plot, with a side panel of legend and stats.
 
     ``scene`` (the run's ``scene.yaml``) adds the setup to the stats panel.
-    Thin grey lines join the optimized keyframes of inter-robot loop closures.
+    Inter-robot loop closures are bright circles on both optimized keyframes, joined by a line.
+    Robots that were never merged show GT and odometry only.
     """
     import matplotlib
 
@@ -267,14 +325,17 @@ def plot_trajectories(result: Evaluation, path: str | Path, scene: dict | None =
                     continue
                 kw = {k: v for k, v in style.items() if k != "label"}
                 ax.plot(xy[:, 0], xy[:, 1], color=color, zorder=2, **kw)
-                ax.plot(*xy[0], "o", ms=6.5, mfc="white", mec=color, mew=1.1, zorder=4)
-                ax.plot(*xy[-1], "o", ms=3.6, mfc=color, mec=color, mew=0, zorder=5)
+                if attr == "gt":
+                    ax.plot(*xy[0], mec=color, zorder=4, **_START)
+                    ax.plot(*xy[-1], mfc=color, zorder=5, **_END)
             positions.update(zip(track.keys, track.optimized))
 
         n_lc = 0
         for a, b in result.loop_closures:
             if a in positions and b in positions:
-                ax.plot(*np.stack((positions[a], positions[b]))[:, :2].T, "-", color="0.55", lw=0.5, alpha=0.8, zorder=1)
+                pair = np.stack((positions[a], positions[b]))[:, :2]
+                # ax.plot(*pair.T, zorder=6, **_LC_LINE)
+                ax.plot(*pair.T, zorder=7, **_LC_MARKER)
                 n_lc += 1
 
         ax.set_aspect("equal", adjustable="datalim")
@@ -297,18 +358,23 @@ def plot_trajectories(result: Evaluation, path: str | Path, scene: dict | None =
             y -= 1.4 * row
 
         # Section 1: rover colours, with each rover's ATE.
-        heading("Rovers  ·  ATE RMSE [m]")
+        heading("Rovers  ·  ATE (RMSE [m]")
         for x, head in zip(cols, ("Rover", "Odometry", "SLAM")):
             side.text(x + (0.11 if x == x0 else 0.0), y, head, color="0.35", **txt)
         y -= 1.1 * row
         side.plot([x0, 0.98], [y, y], **rule)
         y -= 0.3 * row
         ate = [(t.robot_id, t.ate_odometry, t.ate_optimized) for t in result.tracks]
-        for rid, odo, opt in ate:
+        for track, (rid, odo, opt) in zip(result.tracks, ate):
             color = ROVER_COLORS[rid % len(ROVER_COLORS)]
             side.plot([x0, x0 + 0.08], [y - 0.42 * row] * 2, color=color, lw=3.0, solid_capstyle="butt", transform=side.transAxes)
-            for x, val in zip(cols, (f"{rid}", f"{odo:.3f}", f"{opt:.3f}")):
-                side.text(x + (0.11 if x == x0 else 0.0), y, val, **txt)
+            odo_s = "–" if np.isnan(odo) else f"{odo:.3f}"
+            side.text(cols[0] + 0.11, y, f"{rid}", **txt)
+            side.text(cols[1], y, odo_s, **txt)
+            if track.merged:
+                side.text(cols[2], y, f"{opt:.3f}", **txt)
+            else:
+                side.text(cols[2], y, "not merged", color="0.45", style="italic", **txt)
             y -= row
         side.plot([x0, 0.98], [y, y], **rule)
         y -= 0.3 * row
@@ -322,11 +388,12 @@ def plot_trajectories(result: Evaluation, path: str | Path, scene: dict | None =
         ink = "0.2"
         style_handles = [Line2D([], [], color=ink, **{k: v for k, v in s.items() if k != "label"}, label=s["label"]) for s in _STYLE.values()]
         style_handles += [
-            Line2D([], [], ls="", marker="o", ms=6.5, mfc="white", mec=ink, mew=1.1, label="Initial pose"),
-            Line2D([], [], ls="", marker="o", ms=3.6, mfc=ink, mec=ink, label="Final pose"),
+            Line2D([], [], mec=ink, label="Initial pose (GT)", **_START),
+            Line2D([], [], mfc=ink, label="Final pose (GT)", **_END),
         ]
         if n_lc:
-            style_handles.append(Line2D([], [], color="0.55", lw=0.6, label="Inter-robot loop closure"))
+            style_handles.append(Line2D([], [], label="Inter-robot loop closure", #**_LC_LINE,
+                                        **{k: v for k, v in _LC_MARKER.items() if k != "ls"}))
         leg = side.legend(handles=style_handles, loc="upper left", bbox_to_anchor=(x0 - 0.035, y + 0.3 * row), fontsize=8.5,
                           handlelength=2.6, borderaxespad=0.0, labelspacing=0.45)
         fig.canvas.draw()

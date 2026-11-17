@@ -29,17 +29,18 @@ from .cameras import (
 )
 from .config import MultiRoverSetupCfg
 from .layout import (
-    MotionController,
     normalize_commands,
     quat_xyzw_from_yaw,
     spawn_layout,
     yaw_from_quat_xyzw,
 )
+from .motion import MotionController
 from .recorder import (
     Recorder,
     attach_file_logging,
     detach_file_logging,
     make_run_dir,
+    rename_run_dir,
     run_tag,
     write_scene_yaml,
 )
@@ -383,6 +384,7 @@ class MultiRoverSetup:
             max_ang=np.array([r.scale_angular if r.drive else np.inf for r in self.rovers]),
             dt=dt,
             seed=self.cfg.sim.seed,
+            radii=np.array([r.spawn.get("radius_m", 0.5) for r in self.rovers]),
         )
 
     def start_recording(self) -> None:
@@ -420,6 +422,9 @@ class MultiRoverSetup:
             if self.recorder is not None:
                 fps = 1.0 / (self._step_dt() * self.cfg.output.record_every)
                 videos = self.recorder.close(video=self.cfg.output.video, fps=fps)
+            # The recorded duration is only known now; it goes into the folder name.
+            duration_s = self.step_count * self._step_dt()
+            self.run_dir = rename_run_dir(self.run_dir, run_tag(self.cfg, duration_s))
             self._write_scene_yaml(finished=True, failed=failed)
             logger.info(
                 "Finished %d steps, %d frames, %d videos -> %s",
@@ -497,8 +502,8 @@ class MultiRoverSetup:
         device = self.env.unwrapped.device
         camera = self.env.unwrapped.scene.sensors[OVERSEER_SENSOR]
         camera.set_world_poses_from_view(
-            torch.tensor([eye], dtype=torch.float32, device=device),
-            torch.tensor([target], dtype=torch.float32, device=device),
+            torch.as_tensor(np.asarray(eye, dtype=np.float32)[None], device=device),
+            torch.as_tensor(np.asarray(target, dtype=np.float32)[None], device=device),
         )
 
     ###############

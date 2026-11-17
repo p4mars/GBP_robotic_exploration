@@ -77,6 +77,8 @@ class MotionCfg:
     speed_mps: float = 0.25
     cmd: list[float] = field(default_factory=lambda: [0.2, 0.0])
     """``[v m/s, w rad/s]`` applied to every rover for ``kind: constant``."""
+    collision_avoidance: bool = False
+    """Steer around and brake for neighbouring rovers (all kinds except ``idle``)."""
 
 
 @dataclass
@@ -211,6 +213,8 @@ class MultiRoverSetupCfg:
             for pos in positions:
                 if len(pos) not in (2, 3):
                     raise ValueError(f"layout.positions entries are [x, y(, yaw_deg)], got {pos}")
+        if not isinstance(self.motion.collision_avoidance, bool):
+            raise ValueError(f"motion.collision_avoidance must be true/false, got {self.motion.collision_avoidance!r}")
         if len(self.motion.cmd) != 2:
             raise ValueError(f"motion.cmd must be [v, w], got {self.motion.cmd}")
         if self.output.record_every <= 0:
@@ -296,6 +300,7 @@ _CLI_SWITCHES: tuple[tuple[str, str, bool, str], ...] = (
     ("--gui", "sim.headless", False, "open the Isaac Sim window"),
     ("--video", "output.video", True, "encode mp4 per camera at the end"),
     ("--snapshot-only", "output.snapshot_only", True, "spawn, settle, save one frame, exit"),
+    ("--collision-avoidance", "motion.collision_avoidance", True, "steer around and brake for other rovers"),
 )
 
 

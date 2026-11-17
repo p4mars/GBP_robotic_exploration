@@ -2,7 +2,7 @@
 
 Layout of one run::
 
-    <root>/<stamp>__<tag>/
+    <root>/<yy-mm-dd_HH-MM>__<n>R__<motion>__<sec>s/   (``snap`` instead of ``<sec>s`` for snapshots)
       scene.yaml  run.log  overview.png  trajectories.csv  observations.csv
       cameras/<label>/{rgb,depth}/<frame>.{png,npy}  intrinsics.json  poses.csv
       videos/<label>.mp4
@@ -25,18 +25,26 @@ import yaml
 
 from .config import SWARM_SLAM_DIR, MultiRoverSetupCfg
 
-STAMP_FORMAT = "%Y-%m-%d_%H-%M-%S"
+STAMP_FORMAT = "%y-%m-%d_%H-%M"
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+LATEST = "latest"
+
+logger = logging.getLogger(__name__)
 
 
-def run_tag(cfg: MultiRoverSetupCfg) -> str:
-    """Short descriptive tag; rover names and types stay out of it (see scene.yaml)."""
+def run_tag(cfg: MultiRoverSetupCfg, duration_s: float | None = None) -> str:
+    """Short descriptive tag, e.g. ``6R__wander__240s`` or ``6R__wander__snap``.
+
+    Scene, resolution and rover types stay out of it (see scene.yaml). ``duration_s``
+    is the recorded sim time; it is only known once the run ends (see ``rename_run_dir``).
+    """
     if cfg.output.name:
         return _slug(cfg.output.name)
-    width, height = cfg.cameras.resolution
-    parts = [cfg.terrain.kind, f"{len(cfg.rovers)}rovers", cfg.motion.kind, f"{width}x{height}"]
+    parts = [f"{len(cfg.rovers)}R", cfg.motion.kind]
     if cfg.output.snapshot_only:
-        parts.append("snapshot")
+        parts.append("snap")
+    elif duration_s is not None:
+        parts.append(f"{round(duration_s)}s")
     return "__".join(parts)
 
 
@@ -65,14 +73,61 @@ def make_run_dir(root: str | Path, tag: str, *, now: datetime | None = None) -> 
         except FileExistsError:
             suffix += 1
             run_dir = root / f"{base}-{suffix}"
-    latest = root / "latest"
-    try:
-        if latest.is_symlink() or latest.exists():
-            latest.unlink()
-        latest.symlink_to(run_dir.name, target_is_directory=True)
-    except OSError:
-        pass  # symlinks are a convenience only
+    point_latest(run_dir)
     return run_dir
+
+
+def rename_run_dir(run_dir: Path, tag: str) -> Path:
+    """Rename ``<stamp>__<old tag>`` to ``<stamp>__<tag>`` (unique) and move ``latest`` along.
+
+    ``latest`` is only re-pointed if it still points at ``run_dir`` (a newer run may own it).
+    """
+    run_dir = Path(run_dir)
+    stamp = run_dir.name.split("__", 1)[0]
+    base = f"{stamp}__{tag}"
+    if run_dir.name == base:
+        return run_dir
+    target, suffix = run_dir.parent / base, 1
+    while target.exists() or target.is_symlink():
+        suffix += 1
+        target = run_dir.parent / f"{base}-{suffix}"
+    latest = run_dir.parent / LATEST
+    owned = not latest.exists() or (latest.is_symlink() and os.readlink(latest) == run_dir.name)
+    try:
+        run_dir.rename(target)
+    except OSError as err:
+        logger.warning("Could not rename %s -> %s: %s", run_dir.name, target.name, err)
+        return run_dir
+    if owned:
+        point_latest(target)
+    return target
+
+
+def point_latest(run_dir: Path) -> bool:
+    """Atomically point ``<root>/latest`` at ``run_dir`` (relative link); warn on failure."""
+    run_dir = Path(run_dir)
+    latest = run_dir.parent / LATEST
+    tmp = run_dir.parent / f".{LATEST}.{os.getpid()}.tmp"
+    try:
+        if latest.is_dir() and not latest.is_symlink():
+            # A real `latest/` (e.g. created by a tool run while the link was missing) blocks
+            # the link forever. Remove it only if empty; never delete data.
+            try:
+                latest.rmdir()
+            except OSError:
+                raise OSError(f"{latest} is a real, non-empty directory; move it away") from None
+        if tmp.is_symlink() or tmp.exists():
+            tmp.unlink()
+        tmp.symlink_to(run_dir.name, target_is_directory=True)
+        os.replace(tmp, latest)
+        return True
+    except OSError as err:
+        logger.warning("Could not point %s at %s: %s", latest, run_dir.name, err)
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return False
 
 
 def attach_file_logging(path: Path, level: int = logging.INFO) -> logging.Handler:

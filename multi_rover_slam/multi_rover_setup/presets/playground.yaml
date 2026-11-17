@@ -4,6 +4,10 @@ rovers:
   - type: leo_rover
   - type: leo_rover
   - type: leo_rover
+  - type: leo_rover
+  - type: leo_rover
+  - type: leo_rover
+  - type: leo_rover
 
 terrain:
   kind: moon_surface
@@ -14,14 +18,15 @@ terrain:
   augment: none
 
 layout:
-  kind: ring # LAYOUT_KINDS = ("ring", "line", "grid", "random", "explicit")
-  spacing_m: 1.5
-  heading: tangent # HEADINGS = ("chain", "tangent", "center", "random")
+  kind: grid # LAYOUT_KINDS = ("ring", "line", "grid", "random", "explicit")
+  spacing_m: 2.5
+  heading: random # HEADINGS = ("chain", "tangent", "center", "random")
   positions: null
-  spawn_clearance_m: 0.5
+  spawn_clearance_m: 1.0
 
 motion:
-  kind: orbit # MOTION_KINDS = ("follow", "orbit", "wander", "constant", "idle")
+  kind: wander # MOTION_KINDS = ("follow", "orbit", "wander", "constant", "idle")
+  collision_avoidance: true   # default false
   speed_mps: 0.25
   cmd: [0.2, 0.0]
 
@@ -40,7 +45,7 @@ overseer:
   orbit_deg_per_s: 0.0 #6.0
 
 sim:
-  steps: 6000
+  steps: 12000 # t = steps * 0.08s
   settle_steps: 60
   warmup_steps: 8
   seed: 0
