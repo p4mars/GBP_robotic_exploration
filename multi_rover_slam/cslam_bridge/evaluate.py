@@ -760,11 +760,10 @@ def plot_trajectories_indiv(result: Evaluation, path: str | Path, scene: dict | 
             return f"{np.mean(values):.2f} m" if values else "–"
 
         if tracks:
-            # Anchored at each rover's first GT pose, like the odometry, so the two are comparable;
-            # "joint" = one alignment for all merged rovers (shows inter-robot frame errors, as drawn).
+            # Anchored at each rover's first GT pose, like the odometry, so the two are comparable
+            # (the joint-alignment ATE stays in ate.csv / summary.yaml).
             sub.append(f"mean ATE: odometry {_mean_m([t.ate_odometry for t in merged])}, "
-                       f"SLAM {_mean_m([t.ate_optimized_anchored for t in merged])} "
-                       f"(joint {_mean_m([t.ate_optimized for t in merged])}), merged rovers")
+                       f"SLAM {_mean_m([t.ate_optimized_anchored for t in merged])}, merged rovers")
         fig.text(fx(left), fy(0.62), "  ·  ".join(sub), fontsize=10, color="0.35", va="top")
         fig.add_artist(Line2D([fx(left), 1 - fx(right)], [fy(title_h - 0.05)] * 2, color="0.75", lw=0.6))
 
@@ -831,7 +830,7 @@ def plot_trajectories_indiv(result: Evaluation, path: str | Path, scene: dict | 
             ax.tick_params(labelbottom=not below, labelleft=c == 0)
 
             odo = "–" if np.isnan(track.ate_odometry) else f"{track.ate_odometry:.2f} m"
-            slam = (f"{track.ate_optimized_anchored:.2f} m (joint {track.ate_optimized:.2f})" if track.merged
+            slam = (f"{track.ate_optimized_anchored:.2f} m" if track.merged
                     else "not merged")
             ax.text(0.0, 1.0 + 0.21 / cell, f"rover_{track.robot_id}", transform=ax.transAxes, fontsize=10, weight="bold", va="bottom")
             # ATE line; each number in its trajectory's colour (pieces placed one after another).
