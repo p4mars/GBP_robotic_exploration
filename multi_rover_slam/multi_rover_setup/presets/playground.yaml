@@ -25,7 +25,7 @@ layout:
   spawn_clearance_m: 1.0
 
 motion:
-  kind: wander # MOTION_KINDS = ("follow", "orbit", "wander", "constant", "idle")
+  kind: orbit # MOTION_KINDS = ("follow", "orbit", "wander", "constant", "idle")
   collision_avoidance: true   # default false
   speed_mps: 0.25
   cmd: [0.2, 0.0]

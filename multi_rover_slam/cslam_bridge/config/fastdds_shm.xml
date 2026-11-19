@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Fast DDS profile for the cslam replay: shared memory only, with 64 MB segments.
+
+  With the default transports (UDP + SHM with 0.5 MB segments), a 640x480 RGB image (0.9 MB) does
+  not fit into shared memory and falls back to fragmented UDP. As soon as several processes read the
+  image topics (rgbd_odometry and cslam's map_manager per rover), most frames were lost: visual
+  odometry saw 37-49 of 250 frames, lost tracking for good and cslam skipped every frame. With this
+  profile all 251 of 251 frames arrived (2-rover probe, 20 s of orbit bags at rate 0.5).
+
+  Everything runs in one container started with `--ipc host`, so shared memory reaches every node.
+  Used through FASTRTPS_DEFAULT_PROFILES_FILE (set by docker/run.bash and launch/srb_rgbd.launch.py).
+-->
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <transport_descriptors>
+    <transport_descriptor>
+      <transport_id>shm_large</transport_id>
+      <type>SHM</type>
+      <segment_size>67108864</segment_size>
+      <port_queue_capacity>1024</port_queue_capacity>
+    </transport_descriptor>
+  </transport_descriptors>
+  <participant profile_name="cslam_shm_only" is_default_profile="true">
+    <rtps>
+      <userTransports>
+        <transport_id>shm_large</transport_id>
+      </userTransports>
+      <useBuiltinTransports>false</useBuiltinTransports>
+    </rtps>
+  </participant>
+</profiles>

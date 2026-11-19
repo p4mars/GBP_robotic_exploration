@@ -11,14 +11,20 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # multi_rover_slam/
 
 from cslam_bridge.evaluate import (  # noqa: E402
+    anchor_to_first,
     decode_key,
     encode_key,
     evaluate,
+    loop_closure_errors,
+    loop_closure_funnel,
     read_g2o,
+    rpe,
+    vo_health,
     rmse,
     transform_points,
     umeyama,
 )
+from cslam_bridge import session as sessions  # noqa: E402
 from cslam_bridge.odometry import drifted_odometry  # noqa: E402
 from cslam_bridge.run_data import STAMP_OFFSET_S, load_run  # noqa: E402
 from multi_rover_setup.cameras import matrix_to_quat_xyzw  # noqa: E402
@@ -111,9 +117,19 @@ def test_umeyama_recovers_rigid_transform():
     assert rmse(pts, pts) == 0.0
 
 
-def _write_slam_logs(slam_dir: Path, streams, offset: np.ndarray):
+def test_anchor_to_first_recovers_gt_and_lets_drift_grow():
+    gt = np.array([_pose(0.1 * k, 0.02 * k, 0.01 * k) for k in range(200)])
+    other_frame = _pose(-3.0, 7.0, 2.0) @ gt  # same trajectory in an unrelated frame
+    np.testing.assert_allclose(anchor_to_first(other_frame, gt[0]), gt[:, :3, 3], atol=1e-9)
+
+    odom = drifted_odometry(gt, yaw_bias_deg_per_m=1.0)
+    err = np.linalg.norm(anchor_to_first(odom, gt[0]) - gt[:, :3, 3], axis=-1)
+    assert err[0] == pytest.approx(0.0, abs=1e-9) and err[-1] > 5 * err[50] > 0.0
+
+
+def _write_slam_logs(logs_dir: Path, streams, offset: np.ndarray):
     """Fake cslam logs: every 3rd frame is a keyframe, poses = ground truth moved by ``offset``."""
-    folder = slam_dir / "01-01-2026_00-00-00_experiment_robot_0" / "01-01-2026_00-01-00"
+    folder = logs_dir / "01-01-2026_00-00-00_experiment_robot_0" / "01-01-2026_00-01-00"
     folder.mkdir(parents=True)
     vertices, edges = [], []
     for s in streams:
@@ -135,15 +151,23 @@ def _write_slam_logs(slam_dir: Path, streams, offset: np.ndarray):
 
 def test_evaluate_perfect_merge_has_zero_ate(run_dir):
     streams = load_run(run_dir)
-    folder = _write_slam_logs(run_dir / "slam", streams, offset=_pose(5.0, 3.0, 1.0))
+    session = sessions.new_session(run_dir, "gt_drift")
+    folder = _write_slam_logs(sessions.logs_dir(session), streams, offset=_pose(5.0, 3.0, 1.0))
     graph = read_g2o(folder / "optimized_global_pose_graph.g2o")
     assert len(graph.vertices) == 8 and graph.inter_robot_edges() == [(encode_key(0, 1), encode_key(1, 2))]
 
-    result = evaluate(streams, run_dir / "slam")
+    result = evaluate(streams, sessions.logs_dir(sessions.resolve_session(run_dir)))
     assert result.log_dir == folder
     assert [len(t.keys) for t in result.tracks] == [4, 4]
     for track in result.tracks:
         assert track.ate_optimized == pytest.approx(0.0, abs=1e-6)
+        assert track.ate_odometry == pytest.approx(0.0, abs=1e-6)
+        assert track.ate_optimized_anchored == pytest.approx(0.0, abs=1e-6)
+        assert track.rpe_optimized(0.2) == pytest.approx(0.0, abs=1e-6)
+
+    # The fake inter-robot edge measures the identity, so its error equals the true relative pose.
+    [lc] = loop_closure_errors(result, streams)
+    assert lc.error_m == pytest.approx(lc.baseline_m, abs=1e-6) and lc.baseline_m > 0.5
 
 
 def test_bag_round_trip(run_dir, tmp_path):
@@ -165,3 +189,63 @@ def test_bag_round_trip(run_dir, tmp_path):
                 assert msg.encoding == "16UC1" and msg.header.frame_id == "r1_camera" and depth[0, 0] == 1000
                 assert t_ns == int(STAMP_OFFSET_S * 1e9)
                 break
+
+
+def test_sessions_are_separate_and_latest_follows(run_dir):
+    from datetime import datetime
+
+    now = datetime(2026, 11, 17, 12, 24)
+    first = sessions.new_session(run_dir, "vo", now)
+    second = sessions.new_session(run_dir, "vo", now)  # same minute -> suffix
+    gt = sessions.new_session(run_dir, "gt_drift", now)
+    assert [p.name for p in (first, second, gt)] == ["26-11-17_12-24_vo", "26-11-17_12-24_vo_2", "26-11-17_12-24_gt"]
+    assert sessions.resolve_session(run_dir) == gt.resolve()
+    assert sessions.resolve_session(run_dir / "slam" / "latest") == gt.resolve()
+    assert sessions.resolve_session(first) == first.resolve()
+    assert sessions.run_dir_of(first) == run_dir.resolve()
+    with pytest.raises(ValueError):
+        sessions.new_session(run_dir, "lidar", now)
+
+
+def test_odom_mode_from_manifest_then_bags(run_dir):
+    session = sessions.new_session(run_dir, "vo")
+    assert sessions.odom_mode(session) is None
+    bag = sessions.bags_dir(session) / "r0"
+    bag.mkdir(parents=True)
+    (bag / "metadata.yaml").write_text("name: /r0/odom\n")
+    assert sessions.odom_mode(session) == "gt_drift"  # no manifest: guessed from the bags
+    sessions.write_manifest(session, odom="vo", run=run_dir.name)
+    assert sessions.odom_mode(session) == "vo"
+    assert sessions.read_manifest(session) == {"odom": "vo", "run": run_dir.name}
+
+
+def test_vo_health_counts_processed_and_tracked(tmp_path):
+    log = tmp_path / "pipeline.log"
+    log.write_text(
+        "[rgbd_odometry-4] [INFO] [1.0] [r0.rgbd_odometry]: Odom: quality=0, std dev=99.995000m|99.995000rad\n"
+        "[rgbd_odometry-4] [INFO] [1.1] [r0.rgbd_odometry]: Odom: quality=453, std dev=0.001479m|0.020882rad\n"
+        "[rgbd_odometry-8] [INFO] [1.2] [r1.rgbd_odometry]: Odom: quality=0, std dev=0.000000m|0.000000rad\n"
+        "[map_manager-2] [WARN] [1.3] [r0.cslam_map_manager]: Odom tracking failed, skipping frame\n"
+    )
+    health = vo_health(log, {0: 5, 1: 5, 2: 5})
+    assert [(h.frames, h.processed, h.tracked) for h in health.values()] == [(5, 2, 1), (5, 1, 0), (5, 0, 0)]
+    log.write_text("no visual odometry here\n")
+    assert vo_health(log, {0: 5}) == {}
+
+
+def test_rpe_is_zero_for_a_rigidly_moved_copy_and_grows_with_heading_drift():
+    gt = np.array([_pose(0.1 * k, 0.0, 0.0) for k in range(100)])
+    moved = np.array([_pose(3.0, -2.0, 1.0) @ T for T in gt])
+    assert rpe(gt, moved, 1.0) == pytest.approx(0.0, abs=1e-9)
+    drifted = np.array([_pose(0.1 * k * np.cos(0.002 * k), 0.1 * k * np.sin(0.002 * k), 0.002 * k) for k in range(100)])
+    assert rpe(gt, drifted, 5.0) > rpe(gt, drifted, 1.0) > 0.0
+    assert np.isnan(rpe(gt, gt, 100.0))
+
+
+def test_loop_closure_funnel_counts_robot0_view_once_per_attempt(tmp_path):
+    log = tmp_path / "pipeline.log"
+    line = "[loop_closure_detection_node.py-{n}] [INFO] [1.0] [r{r}.cslam_loop_closure_detection]: {kind} inter-robot loop closure measurement: ({a},3) -> ({b},7)\n"
+    log.write_text("".join(line.format(n=i, r=r, kind=kind, a=a, b=b)
+                           for i, (kind, a, b) in enumerate([("Failed", 5, 8), ("New", 8, 5), ("Failed", 0, 3)])
+                           for r in range(3)))  # every robot logs every result
+    assert loop_closure_funnel(log) == {(0, 3): (1, 0), (5, 8): (2, 1)}

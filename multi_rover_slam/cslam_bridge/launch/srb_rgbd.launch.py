@@ -1,25 +1,34 @@
 """Replay a multi_rover_setup run through Swarm-SLAM (cslam), one namespace /r<id> per rover.
 
 Per rover: cslam's three nodes, optionally RTAB-Map RGB-D visual odometry, and
-``ros2 bag play`` of ``<run_dir>/bags/r<id>``. cslam logs (g2o graphs, keyframe
-stamps) go to ``<run_dir>/slam``. The launch shuts down ``linger_s`` after the
-last bag finished, which leaves time for a final pose graph optimization.
+``ros2 bag play`` of ``<session>/bags/r<id>``, where ``<session>`` is a SLAM session folder
+``<run>/slam/<yy-mm-dd_HH-MM>_<vo|gt>`` written by tools/run_to_bags.py. cslam logs (g2o
+graphs, keyframe stamps) go to ``<session>/logs``. The launch shuts down ``linger_s`` after
+the last bag finished, which leaves time for a final pose graph optimization.
 
-    ros2 launch multi_rover_slam/cslam_bridge/launch/srb_rgbd.launch.py run_dir:=<run> [odom:=vo|bag]
+    ros2 launch multi_rover_slam/cslam_bridge/launch/srb_rgbd.launch.py session:=<run>/slam/latest [odom:=auto|vo|bag]
 
+odom:=auto (default) from the session's session.yaml: vo for --odom vo bags, bag for --odom gt_drift
 odom:=vo   RTAB-Map rgbd_odometry on the replayed images (bags written with --odom vo)
 odom:=bag  odometry recorded in the bags (bags written with --odom gt_drift)
 """
 
+import os
+import sys
 from pathlib import Path
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction, RegisterEventHandler, Shutdown, TimerAction
+from launch.actions import (DeclareLaunchArgument, ExecuteProcess, OpaqueFunction, RegisterEventHandler, SetEnvironmentVariable,
+                            Shutdown, TimerAction)
 from launch.event_handlers import OnProcessExit
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 CONFIG = Path(__file__).resolve().parent.parent / "config" / "srb_rgbd.yaml"
+# Shared-memory-only Fast DDS transport; with the default one most image frames are lost (see the XML).
+FASTDDS_PROFILE = Path(__file__).resolve().parent.parent / "config" / "fastdds_shm.xml"
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # multi_rover_slam/, for cslam_bridge.session
+from cslam_bridge import session as sessions  # noqa: E402
 
 
 def robot_nodes(robot_id: int, num_robots: int, args: dict) -> list:
@@ -30,7 +39,7 @@ def robot_nodes(robot_id: int, num_robots: int, args: dict) -> list:
             "robot_id": robot_id,
             "max_nb_robots": num_robots,
             "frontend.nn_checkpoint": args["nn_checkpoint"],
-            "evaluation.log_folder": str(Path(args["run_dir"]) / "slam"),
+            "evaluation.log_folder": str(sessions.logs_dir(args["session"])),
         },
     ]
     nodes = [
@@ -61,13 +70,20 @@ def robot_nodes(robot_id: int, num_robots: int, args: dict) -> list:
 
 def launch_setup(context, *_, **__):
     args = {name: LaunchConfiguration(name).perform(context)
-            for name in ("run_dir", "odom", "rate", "start_delay_s", "linger_s", "nn_checkpoint", "config")}
+            for name in ("session", "odom", "rate", "start_delay_s", "linger_s", "nn_checkpoint", "config")}
+    session = sessions.resolve_session(args["session"])  # follows `latest`; a run folder means its newest session
+    args["session"] = str(session)
+    if args["odom"] == "auto":
+        mode = sessions.odom_mode(session)
+        if mode is None:
+            raise FileNotFoundError(f"Cannot tell the odometry mode of {session}: no session.yaml and no bags")
+        args["odom"] = "bag" if mode == "gt_drift" else "vo"
     if args["odom"] not in ("vo", "bag"):
-        raise ValueError(f"odom must be vo or bag, got {args['odom']!r}")
-    args["run_dir"] = str(Path(args["run_dir"]).resolve())  # follows the `latest` link
-    bags = sorted((Path(args["run_dir"]) / "bags").glob("r[0-9]*"), key=lambda p: int(p.name[1:]))
+        raise ValueError(f"odom must be auto, vo or bag, got {args['odom']!r}")
+    bags = sorted(sessions.bags_dir(session).glob("r[0-9]*"), key=lambda p: int(p.name[1:]))
     if not bags:
-        raise FileNotFoundError(f"No bags under {args['run_dir']}/bags; run tools/run_to_bags.py first")
+        raise FileNotFoundError(f"No bags under {sessions.bags_dir(session)}; run tools/run_to_bags.py first")
+    print(f"[srb_rgbd] session {session}, odom:={args['odom']}, {len(bags)} rovers")
 
     actions, players = [], []
     for bag in bags:
@@ -89,9 +105,12 @@ def launch_setup(context, *_, **__):
 
 
 def generate_launch_description():
+    profile = os.environ.get("FASTRTPS_DEFAULT_PROFILES_FILE") or str(FASTDDS_PROFILE)
     return LaunchDescription([
-        DeclareLaunchArgument("run_dir", description="multi_rover_setup run folder containing bags/"),
-        DeclareLaunchArgument("odom", default_value="vo", description="vo | bag"),
+        SetEnvironmentVariable("FASTRTPS_DEFAULT_PROFILES_FILE", profile),
+        SetEnvironmentVariable("FASTDDS_DEFAULT_PROFILES_FILE", profile),
+        DeclareLaunchArgument("session", description="SLAM session folder <run>/slam/<name> (or a run folder: its newest session)"),
+        DeclareLaunchArgument("odom", default_value="auto", description="auto (from session.yaml) | vo | bag"),
         DeclareLaunchArgument("rate", default_value="0.5", description="bag playback rate"),
         DeclareLaunchArgument("start_delay_s", default_value="15.0", description="wait before playing bags"),
         DeclareLaunchArgument("linger_s", default_value="30.0", description="wait after the bags before shutdown"),
