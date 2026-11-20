@@ -121,10 +121,11 @@ rclpy. The Swarm-SLAM side stays unchanged; only `ros2 bag play` is dropped.
 
 Metrics (`ate.csv`, `summary.yaml`; means over merged rovers):
 
-- **ATE odometry** and **ATE SLAM (anchored)**: each rover anchored at the GT pose of its first keyframe, so
-  odometry and SLAM are compared on equal terms. Use these to compare methods per rover.
-- **ATE SLAM (joint)**: one transform for all merged rovers (as drawn), so a wrong merge or inter-robot frame
-  error shows up as a displaced rover. Measures global map consistency.
+- **ATE SLAM** (`ate_slam_joint_m`, shown in the plots): the optimized pose graph aligned with one transform
+  for all merged rovers (as drawn), so a wrong merge or inter-robot frame error shows up as a displaced rover.
+- **ATE odometry**: each rover anchored at the GT pose of its first keyframe (the rovers share no frame).
+- **ATE SLAM anchored** (`ate_slam_anchored_m`, secondary): optimized poses anchored per rover like the
+  odometry; hides inter-robot frame errors.
 - **RPE 1 m / 5 m**: translation error of relative poses over 1 m / 5 m of path, independent of anchoring.
 
 ## Tests

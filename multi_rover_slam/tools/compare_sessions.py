@@ -19,7 +19,7 @@ from cslam_bridge import session as sessions  # noqa: E402
 COLUMNS = [
     ("merged", "merged"), ("inter_robot_lc", "LC"), ("verified", "verif ok"), ("verifications", "verif"),
     ("lc_baseline_median_m", "LC base med"), ("lc_baseline_max_m", "LC base max"), ("lc_error_max_m", "LC err max"),
-    ("ate_odometry_m", "ATE odom"), ("ate_slam_anchored_m", "ATE SLAM"), ("ate_slam_joint_m", "ATE joint"),
+    ("ate_odometry_m", "ATE odom"), ("ate_slam_joint_m", "ATE SLAM"), ("ate_slam_anchored_m", "ATE anch"),
     ("rpe1m_odometry_m", "RPE1 odom"), ("rpe1m_slam_m", "RPE1 SLAM"), ("rpe5m_odometry_m", "RPE5 odom"), ("rpe5m_slam_m", "RPE5 SLAM"),
 ]
 

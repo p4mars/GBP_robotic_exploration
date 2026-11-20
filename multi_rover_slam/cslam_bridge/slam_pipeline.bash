@@ -72,6 +72,15 @@ echo "[slam_pipeline] run: ${RUN}"
 echo "[slam_pipeline] session: ${SESSION} (odom: ${ODOM}, config: ${CONFIG})"
 cp "${CONFIG}" "${SESSION}/srb_rgbd.yaml"  # the exact parameters of this session
 python3 multi_rover_slam/tools/run_to_bags.py "${RUN}" "${BAG_ARGS[@]}" --session "${SESSION}"
+# Fast DDS shared-memory segments of crashed processes stay in /dev/shm (shared with the host via
+# --ipc host) and can stall the next replay. `fastdds shm clean` removes only segments nobody uses.
+fastdds shm clean >/dev/null 2>&1 || echo "[slam_pipeline] warning: fastdds shm clean failed"
 ros2 launch multi_rover_slam/cslam_bridge/launch/srb_rgbd.launch.py session:="${SESSION}" config:="${SESSION}/srb_rgbd.yaml"
+# The launch writes this marker when a node crashed or the replay overran its timeout.
+if [[ -f "${SESSION}/replay_failed.txt" ]]; then
+    echo >&2 "[slam_pipeline] replay FAILED, skipping evaluation: $(cat "${SESSION}/replay_failed.txt")"
+    fastdds shm clean >/dev/null 2>&1 || true
+    exit 1
+fi
 python3 multi_rover_slam/tools/eval_slam.py "${SESSION}"
 echo "[slam_pipeline] done: ${SESSION}"

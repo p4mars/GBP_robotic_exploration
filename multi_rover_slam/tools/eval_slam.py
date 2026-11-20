@@ -53,10 +53,10 @@ def main() -> None:
     print(f"session: {session} (odometry: {sessions.odom_mode(session)})")
     print(f"graph: {result.log_dir}")
     print(f"inter-robot loop closures: {len(result.loop_closures)}")
-    print(f"{'robot':>5} {'keyframes':>9} {'ATE odom':>9} {'ATE SLAM':>9} {'(joint)':>8} {'RPE1m odom':>10} {'RPE1m SLAM':>10}  [m]")
+    print(f"{'robot':>5} {'keyframes':>9} {'ATE odom':>9} {'ATE SLAM':>9} {'(anch)':>8} {'RPE1m odom':>10} {'RPE1m SLAM':>10}  [m]")
     for t in result.tracks:
-        print(f"{'r%d' % t.robot_id:>5} {len(t.keys):>9} {t.ate_odometry:>9.3f} {t.ate_optimized_anchored:>9.3f} "
-              f"{t.ate_optimized:>8.3f} {t.rpe_odometry(1.0):>10.3f} {t.rpe_optimized(1.0):>10.3f}")
+        print(f"{'r%d' % t.robot_id:>5} {len(t.keys):>9} {t.ate_odometry:>9.3f} {t.ate_optimized:>9.3f} "
+              f"{t.ate_optimized_anchored:>8.3f} {t.rpe_odometry(1.0):>10.3f} {t.rpe_optimized(1.0):>10.3f}")
 
     write_ate_csv(result, session / "ate.csv")
     scene_path = run_dir / "scene.yaml"
