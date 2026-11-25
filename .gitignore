@@ -23,6 +23,9 @@ target/
 docs/book/
 docs/index.html
 
+# Docs
+docs/
+
 ## Docker History
 .docker/.history/
 
