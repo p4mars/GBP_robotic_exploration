@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
-from multi_rover_setup.cameras import quat_xyzw_to_matrix
+from multi_rover_setup.cameras import OVERSEER_LABEL, quat_xyzw_to_matrix
 
 # Added to the simulation time so that no ROS stamp is zero (zero means "unset" to many nodes).
 STAMP_OFFSET_S = 1.0
@@ -62,14 +62,22 @@ def load_run(run_dir: str | Path) -> list[CameraStream]:
     return [_load_camera(cam_dir, robot_id) for robot_id, (_, cam_dir) in enumerate(sorted(streams_by_rover.items()))]
 
 
-def _load_camera(cam_dir: Path, robot_id: int) -> CameraStream:
+def load_overseer(run_dir: str | Path) -> CameraStream:
+    """The overseer (3rd-person) RGB camera; ``robot_id`` is -1 and ``depth`` is empty."""
+    cam_dir = Path(run_dir) / "cameras" / OVERSEER_LABEL
+    if not (cam_dir / "poses.csv").is_file():
+        raise FileNotFoundError(f"No overseer camera in {cam_dir.parent} (recorded with `overseer.mode: off`?)")
+    return _load_camera(cam_dir, robot_id=-1, require_depth=False)
+
+
+def _load_camera(cam_dir: Path, robot_id: int, *, require_depth: bool = True) -> CameraStream:
     info = json.loads((cam_dir / "intrinsics.json").read_text())
     stamps, poses, rgb, depth = [], [], [], []
     with open(cam_dir / "poses.csv", newline="") as f:
         for row in csv.DictReader(f):
             name = f"{int(row['frame']):06d}.png"
             rgb_path, depth_path = cam_dir / "rgb" / name, cam_dir / "depth" / name
-            if not (rgb_path.is_file() and depth_path.is_file()):
+            if not rgb_path.is_file() or (require_depth and not depth_path.is_file()):
                 continue  # e.g. an aborted run whose last frame was never written
             pose = np.eye(4)
             pose[:3, :3] = quat_xyzw_to_matrix([float(row[k]) for k in ("qx", "qy", "qz", "qw")])
@@ -77,7 +85,8 @@ def _load_camera(cam_dir: Path, robot_id: int) -> CameraStream:
             stamps.append(float(row["time_s"]) + STAMP_OFFSET_S)
             poses.append(pose)
             rgb.append(rgb_path)
-            depth.append(depth_path)
+            if require_depth:
+                depth.append(depth_path)
     return CameraStream(
         robot_id=robot_id,
         label=cam_dir.name,

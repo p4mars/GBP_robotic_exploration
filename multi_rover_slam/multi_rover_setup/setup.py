@@ -44,7 +44,15 @@ from .recorder import (
     run_tag,
     write_scene_yaml,
 )
-from .terrain import TerrainHeightField, build_scenery, terrain_domain, terrain_half_extent
+from .terrain import (
+    TERRAIN_FILE,
+    TerrainHeightField,
+    build_scenery,
+    mesh_points_from_stage,
+    save_terrain_geometry,
+    terrain_domain,
+    terrain_half_extent,
+)
 
 logger = logging.getLogger("multi_rover_setup")
 
@@ -319,13 +327,19 @@ class MultiRoverSetup:
         stage = omni.usd.get_context().get_stage()
         scenery_cfg = getattr(unwrapped.scene.cfg, "scenery", None)
         field = None
-        if scenery_cfg is not None:
-            field = TerrainHeightField.from_stage(stage, scenery_cfg.prim_path)
+        meshes = mesh_points_from_stage(stage, scenery_cfg.prim_path) if scenery_cfg is not None else []
+        if meshes:
+            field = TerrainHeightField(np.concatenate([points for _, points in meshes], axis=0))
+            try:
+                save_terrain_geometry(self.run_dir / TERRAIN_FILE, meshes)
+            except OSError as err:
+                logger.warning("Could not save %s: %s", TERRAIN_FILE, err)
         if field is None:
             logger.warning("No terrain mesh found; rovers drop from their spawn height instead")
         else:
             self.height_field_points = field.num_points
-            logger.info("Terrain height field from %d vertices", field.num_points)
+            logger.info("Terrain height field from %d vertices in %d meshes (saved to %s)",
+                        field.num_points, len(meshes), TERRAIN_FILE)
 
         origin = unwrapped.scene.env_origins[0].detach().cpu().numpy().astype(float)
         bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
@@ -624,6 +638,7 @@ class MultiRoverSetup:
             "steps_run": self.step_count,
             "frames": self.recorder.frame if self.recorder else 0,
             "terrain_height_field_points": self.height_field_points,
+            "terrain_file": TERRAIN_FILE if (self.run_dir / TERRAIN_FILE).is_file() else None,
             "rovers": [
                 {
                     "label": r.label,

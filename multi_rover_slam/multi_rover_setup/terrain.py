@@ -135,25 +135,54 @@ class TerrainHeightField:
 
     @classmethod
     def from_stage(cls, stage, root_path: str, cell_m: float = 0.25) -> TerrainHeightField | None:
-        """Collect world-space vertices of every mesh under ``root_path``."""
-        from pxr import Usd, UsdGeom
+        """Height field over the world-space vertices of every mesh under ``root_path``."""
+        meshes = mesh_points_from_stage(stage, root_path)
+        if not meshes:
+            return None
+        return cls(np.concatenate([points for _, points in meshes], axis=0), cell_m=cell_m)
 
-        root = stage.GetPrimAtPath(root_path)
-        if not root or not root.IsValid():
-            return None
-        xform_cache = UsdGeom.XformCache(Usd.TimeCode.Default())
-        chunks = []
-        for prim in Usd.PrimRange(root, Usd.TraverseInstanceProxies()):
-            if not prim.IsA(UsdGeom.Mesh):
-                continue
-            points = UsdGeom.Mesh(prim).GetPointsAttr().Get()
-            if not points:
-                continue
-            local = np.asarray(points, dtype=float)
-            mat = np.asarray(xform_cache.GetLocalToWorldTransform(prim), dtype=float)
-            # USD matrices are row-major with row vectors: p_w = [p, 1] @ M
-            world = local @ mat[:3, :3] + mat[3, :3]
-            chunks.append(world)
-        if not chunks:
-            return None
-        return cls(np.concatenate(chunks, axis=0), cell_m=cell_m)
+
+def mesh_points_from_stage(stage, root_path: str) -> list[tuple[str, np.ndarray]]:
+    """``(prim path, (N, 3) world-space vertices)`` of every mesh under ``root_path``; empty if none."""
+    from pxr import Usd, UsdGeom
+
+    root = stage.GetPrimAtPath(root_path)
+    if not root or not root.IsValid():
+        return []
+    xform_cache = UsdGeom.XformCache(Usd.TimeCode.Default())
+    meshes = []
+    for prim in Usd.PrimRange(root, Usd.TraverseInstanceProxies()):
+        if not prim.IsA(UsdGeom.Mesh):
+            continue
+        points = UsdGeom.Mesh(prim).GetPointsAttr().Get()
+        if not points:
+            continue
+        local = np.asarray(points, dtype=float)
+        mat = np.asarray(xform_cache.GetLocalToWorldTransform(prim), dtype=float)
+        # USD matrices are row-major with row vectors: p_w = [p, 1] @ M
+        meshes.append((str(prim.GetPath()), local @ mat[:3, :3] + mat[3, :3]))
+    return meshes
+
+
+###########################
+## Saved terrain geometry ##
+###########################
+
+TERRAIN_FILE = "terrain.npz"
+"""Terrain vertices in the run folder, for drawing (e.g. ``overseer_viz``); written by ``place_on_terrain``."""
+
+
+def save_terrain_geometry(path, meshes: list[tuple[str, np.ndarray]]) -> None:
+    """Write world-space mesh vertices as ``points`` (N, 3), ``mesh_id`` (N,) and ``mesh_paths`` (K,)."""
+    if not meshes:
+        raise ValueError("save_terrain_geometry needs at least one mesh")
+    points = np.concatenate([np.asarray(p, dtype=np.float32).reshape(-1, 3) for _, p in meshes], axis=0)
+    mesh_id = np.concatenate([np.full(len(p), i, dtype=np.int32) for i, (_, p) in enumerate(meshes)])
+    np.savez_compressed(path, points=points, mesh_id=mesh_id, mesh_paths=np.array([name for name, _ in meshes]))
+
+
+def load_terrain_geometry(path) -> list[tuple[str, np.ndarray]]:
+    """Inverse of :func:`save_terrain_geometry`: ``(prim path, (N, 3) float64 vertices)`` per mesh."""
+    with np.load(path) as data:
+        points, mesh_id, names = data["points"].astype(float), data["mesh_id"], data["mesh_paths"]
+    return [(str(name), points[mesh_id == i]) for i, name in enumerate(names)]
